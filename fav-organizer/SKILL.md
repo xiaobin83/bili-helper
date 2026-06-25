@@ -27,13 +27,16 @@ uv run fav-organizer classify --all --clear-cache
 
 # 仅整理前 N 个收藏内容
 uv run fav-organizer classify --folder "默认收藏夹" --count 20
+
+# 启用重复内容检测（默认关闭）
+uv run fav-organizer classify --folder "默认收藏夹" --dedup
 ```
 
 **此阶段完成：**
 - 鉴权（二维码/环境变量/`.auth.json`）
 - 列出收藏夹内容
 - 扫描失效视频（UP主删除 / 平台删除）
-- 检测重复内容（默认文件夹 vs 命名文件夹）
+- 重复内容检测（需 `--dedup` 启用）
 - 获取视频元数据（简介、分区），缓存到磁盘（30 天 TTL）
 - 输出 `state.json` + `classification_result.json` 模板
 
