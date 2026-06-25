@@ -164,6 +164,7 @@ async def cmd_classify(
     scope_value: str,
     clear_cache: bool = False,
     count: int | None = None,
+    dedup: bool = False,
 ) -> int:
     """Scan favorites, detect invalid/duplicate, and prepare state for LLM classification.
 
@@ -234,9 +235,12 @@ async def cmd_classify(
             ))
 
         # Dedup
-        print(f"正在检测重复内容 ({len(folders)} 个收藏夹)...")
-        duplicates = await detect_duplicates(folders, fav_api)
-        print(f"  发现 {len(duplicates)} 组重复内容")
+        if dedup:
+            print(f"正在检测重复内容 ({len(folders)} 个收藏夹)...")
+            duplicates = await detect_duplicates(folders, fav_api)
+            print(f"  发现 {len(duplicates)} 组重复内容")
+        else:
+            duplicates = []
 
         # Collect all valid items with their source folder mapping
         all_items: list[FavoritedItem] = []
@@ -697,6 +701,10 @@ def cli() -> None:
         "--count", type=int, metavar="N",
         help="仅整理前 N 个收藏内容（默认：全部）",
     )
+    p_classify.add_argument(
+        "--dedup", action="store_true",
+        help="启用重复内容检测",
+    )
 
     # plan
     p_plan = sub.add_parser("plan", help="读取分类结果，生成整理计划")
@@ -722,6 +730,7 @@ def cli() -> None:
             scope_value=scope_value,
             clear_cache=args.clear_cache,
             count=args.count,
+            dedup=args.dedup,
         )))
     elif args.command == "plan":
         sys.exit(cmd_plan(classification_path=args.classification))
