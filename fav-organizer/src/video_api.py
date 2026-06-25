@@ -1,33 +1,41 @@
-"""Video info API wrapper using Bilibili's /x/web-interface/view endpoint.
+"""Video info API wrapper with disk-backed cache (30-day TTL).
 
-Caches results per BVID so the same video is never fetched twice.
+Caches results to ``.fav-organizer/video_cache.json`` so repeated
+classify runs don't refetch video metadata.  Cache can be cleared
+via ``StateManager.clear_video_cache()``.
 """
 
 from __future__ import annotations
 
 from .http_client import BiliHTTPClient
+from .state_manager import StateManager
 
 BASE_URL = "https://api.bilibili.com/x/web-interface/view"
 
 
 class VideoInfoAPI:
-    """Wrapper for the Bilibili video-info endpoint with BVID-based caching.
+    """Wrapper for the Bilibili video-info endpoint with two-level caching.
 
-    Calls ``GET /x/web-interface/view?bvid=X`` to fetch full video metadata
-    (including the partition ``tid``) and caches every response in memory so
-    subsequent requests for the same BVID return instantly.
+    Level 1: in-memory dict (instant, per-session).
+    Level 2: disk cache via ``StateManager`` (30-day TTL, survives restarts).
 
     Usage::
 
         async with BiliHTTPClient(sessdata="...", bili_jct="...") as http:
             api = VideoInfoAPI(http)
             info = await api.get_video_info("BV1xx411c7mD")
-            print(info["tid"], info["tname"])
+            print(info.get("tid"), info.get("tname"))
     """
 
-    def __init__(self, http_client: BiliHTTPClient) -> None:
+    def __init__(
+        self,
+        http_client: BiliHTTPClient,
+        state_manager: StateManager | None = None,
+    ) -> None:
         self._http: BiliHTTPClient = http_client
-        self._cache: dict[str, dict] = {}
+        self._state = state_manager or StateManager()
+        # In-memory cache (fast, per-session)
+        self._mem_cache: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -36,17 +44,47 @@ class VideoInfoAPI:
     async def get_video_info(self, bvid: str) -> dict:
         """Return the ``data`` dict from ``/x/web-interface/view?bvid={bvid}``.
 
-        The first call for a given BVID performs an HTTP request; subsequent
-        calls return the cached result immediately.
+        Lookup order: memory cache → disk cache (30-day TTL) → API call.
         """
-        if bvid in self._cache:
-            return self._cache[bvid]
+        # Level 1: memory
+        if bvid in self._mem_cache:
+            return self._mem_cache[bvid]
 
+        # Level 2: disk (30-day TTL)
+        cached = self._state.get_cached_video(bvid)
+        if cached is not None:
+            self._mem_cache[bvid] = cached
+            return cached
+
+        # Level 3: API call
         raw = await self._http.get(BASE_URL, params={"bvid": bvid})
         data: dict = raw.get("data", {})
-        self._cache[bvid] = data
+
+        # Persist to both caches
+        self._mem_cache[bvid] = data
+        self._state.set_cached_video(bvid, data)
+
         return data
 
+    # ------------------------------------------------------------------
+    # Cache utilities
+    # ------------------------------------------------------------------
+
     def is_cached(self, bvid: str) -> bool:
-        """Return ``True`` if the given BVID is already in the local cache."""
-        return bvid in self._cache
+        """Return ``True`` if the given BVID is in the memory cache."""
+        return bvid in self._mem_cache
+
+    def preload_from_disk(self, bvids: list[str]) -> int:
+        """Preload disk cache entries into memory. Returns count loaded."""
+        count = 0
+        for bvid in bvids:
+            if bvid not in self._mem_cache:
+                cached = self._state.get_cached_video(bvid)
+                if cached is not None:
+                    self._mem_cache[bvid] = cached
+                    count += 1
+        return count
+
+    def clear_disk_cache(self) -> None:
+        """Delete the disk cache file."""
+        self._state.clear_video_cache()

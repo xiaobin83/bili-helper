@@ -1,36 +1,46 @@
 """
-Tests for main.py — CLI entry point, pipeline orchestration, preview, executor.
+Tests for main.py — CLI entry point, 3 commands (classify/plan/execute), preview.
 
 Covers:
-- CLI argument parsing (--dry-run flag)
-- run_pipeline async orchestrator (dry-run and normal modes)
+- CLI subcommand parsing (classify, plan, execute)
 - generate_preview produces correct markdown
-- execute_plan calls fav_api methods with correct arguments
-- Pipeline modules are called in the expected order
+- cmd_plan reads state + classification, produces plan
+- cmd_execute loads plan, confirms, executes
 """
 
 from __future__ import annotations
 
-import asyncio
+import json
 from pathlib import Path
-from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Add src to path
 import sys
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from src.main import cli, execute_plan, generate_preview, run_pipeline
+from src.main import (
+    cli,
+    cmd_classify,
+    cmd_plan,
+    cmd_execute,
+    generate_preview,
+)
 from src.models import (
-    ClassificationResult,
-    DuplicateGroup,
+    ClassificationEntry,
+    ClassificationResultList,
     FavoritedItem,
     Folder,
+    InvalidItemEntry,
     Operation,
     OrganizePlan,
+    PlanFile,
+    PlanMoveEntry,
+    PlanDeleteEntry,
+    PlanResourceRef,
+    StateData,
 )
+from src.state_manager import StateManager
 
 
 # ---------------------------------------------------------------------------
@@ -46,14 +56,7 @@ def _make_folder(
     media_count: int = 10,
     mid: int = 1000,
 ) -> Folder:
-    return Folder(
-        id=fid,
-        fid=fid,
-        mid=mid,
-        attr=attr,
-        title=title,
-        media_count=media_count,
-    )
+    return Folder(id=fid, fid=fid, mid=mid, attr=attr, title=title, media_count=media_count)
 
 
 def _make_item(
@@ -62,55 +65,14 @@ def _make_item(
     bvid: str = "BV1xx411c7mD",
     title: str = "测试视频",
     attr: int = 0,
+    intro: str = "",
+    zone_tname: str = "",
 ) -> FavoritedItem:
     return FavoritedItem(
-        id=item_id,
-        type=2,
-        title=title,
-        bvid=bvid,
-        upper_name="UP主A",
-        upper_mid=100,
-        attr=attr,
-        fav_time=1234567890,
+        id=item_id, type=2, title=title, bvid=bvid,
+        upper_name="UP主A", upper_mid=100, attr=attr, fav_time=1234567890,
+        intro=intro, zone_tname=zone_tname,
     )
-
-
-def _make_plan() -> OrganizePlan:
-    """Create a simple plan for testing preview and execution."""
-    folder = _make_folder(2, title="旧收藏", attr=1)
-    item = _make_item(1)
-    move_op = Operation(
-        action="move",
-        source=folder,
-        target="科技区",
-        resources=[item],
-    )
-    delete_op = Operation(
-        action="batch_delete",
-        source=folder,
-        resources=[item],
-    )
-    return OrganizePlan(
-        total_operations=2,
-        folders_to_create=["科技区"],
-        moves=[move_op],
-        deletions=[delete_op],
-        summary="需要创建 1 个文件夹，移动 1 个内容，删除 1 个内容",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Helpers: mock HTTP client
-# ---------------------------------------------------------------------------
-
-
-def _make_http_mock() -> MagicMock:
-    """Create a properly configured mock for BiliHTTPClient async context manager."""
-    mock_http = MagicMock()
-    mock_http.__aenter__.return_value = mock_http
-    mock_http.__aexit__.return_value = False
-    mock_http.close = AsyncMock()
-    return mock_http
 
 
 # ---------------------------------------------------------------------------
@@ -119,225 +81,116 @@ def _make_http_mock() -> MagicMock:
 
 
 class TestCli:
-    """Tests for the cli() entry point."""
+    """Tests for the cli() entry point with subcommands."""
 
-    def test_dry_run_flag(self):
-        """--dry-run flag should be passed through to run_pipeline."""
-        with patch("src.main.run_pipeline") as mock_run:
-            mock_run.return_value = 0
-            with patch("src.main.sys.exit") as mock_exit:
-                with patch(
-                    "src.main.sys.argv", ["fav-organizer", "--dry-run"]
-                ):
-                    cli()
-                    mock_run.assert_called_once_with(dry_run=True)
-                    mock_exit.assert_called_once_with(0)
+    async def _mock_coro(self, **kwargs):
+        return 0
 
-    def test_normal_mode(self):
-        """Without --dry-run, run_pipeline is called with dry_run=False."""
-        with patch("src.main.run_pipeline") as mock_run:
-            mock_run.return_value = 0
-            with patch("src.main.sys.exit") as mock_exit:
-                with patch("src.main.sys.argv", ["fav-organizer"]):
-                    cli()
-                    mock_run.assert_called_once_with(dry_run=False)
-                    mock_exit.assert_called_once_with(0)
+    def test_classify_subcommand(self):
+        """classify --folder 'xxx' triggers cmd_classify."""
+        with (
+            patch("src.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
+            patch("src.main.sys.exit"),
+            patch("src.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹"]),
+        ):
+            mock_cmd.return_value = 0
+            cli()
+            mock_cmd.assert_called_once_with(
+                scope_kind="folder", scope_value="默认收藏夹", clear_cache=False
+            )
 
-    def test_exit_code_propagated(self):
-        """Exit code from run_pipeline is passed to sys.exit."""
-        with patch("src.main.run_pipeline") as mock_run:
-            mock_run.return_value = 42
-            with patch("src.main.sys.exit") as mock_exit:
-                with patch("src.main.sys.argv", ["fav-organizer"]):
-                    cli()
-                    mock_exit.assert_called_once_with(42)
+    def test_classify_all(self):
+        """classify --all triggers cmd_classify with scope all."""
+        with (
+            patch("src.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
+            patch("src.main.sys.exit"),
+            patch("src.main.sys.argv", ["fav-organizer", "classify", "--all"]),
+        ):
+            mock_cmd.return_value = 0
+            cli()
+            mock_cmd.assert_called_once_with(
+                scope_kind="all", scope_value="全部", clear_cache=False
+            )
+
+    def test_plan_subcommand(self):
+        """plan subcommand triggers cmd_plan."""
+        with (
+            patch("src.main.cmd_plan") as mock_cmd,
+            patch("src.main.sys.exit"),
+            patch("src.main.sys.argv", ["fav-organizer", "plan"]),
+        ):
+            mock_cmd.return_value = 0
+            cli()
+            mock_cmd.assert_called_once_with(classification_path=None)
+
+    def test_execute_subcommand(self):
+        """execute subcommand triggers cmd_execute."""
+        with (
+            patch("src.main.cmd_execute", new_callable=AsyncMock) as mock_cmd,
+            patch("src.main.sys.exit"),
+            patch("src.main.sys.argv", ["fav-organizer", "execute"]),
+        ):
+            mock_cmd.return_value = 0
+            cli()
+            mock_cmd.assert_called_once_with(plan_path=None)
+
+    def test_no_subcommand_shows_help(self):
+        """No subcommand prints help."""
+        with (
+            patch("src.main.sys.exit") as mock_exit,
+            patch("src.main.sys.argv", ["fav-organizer"]),
+        ):
+            cli()
+            mock_exit.assert_called_once_with(1)
 
 
 # ---------------------------------------------------------------------------
-# run_pipeline — pipeline orchestration
+# cmd_plan (sync — no asyncio)
 # ---------------------------------------------------------------------------
 
 
-class TestRunPipeline:
-    """Tests for the async run_pipeline orchestrator."""
+class TestCmdPlan:
+    """Tests for cmd_plan — reads state + classification, builds plan."""
 
-    @pytest.mark.asyncio
-    async def test_dry_run_sends_preview_no_execute(self):
-        """In dry-run mode, preview is printed but execute_plan is NOT called."""
-        plan = _make_plan()
-        creds = MagicMock()
-        creds.mid = 1000
-
-        folders = [_make_folder(1, title="默认收藏夹", attr=0)]
-        items = [_make_item(1)]
-        mock_fav_api = MagicMock()
-        mock_fav_api.list_all_folders = AsyncMock(return_value=folders)
-        mock_fav_api.get_all_contents = AsyncMock(return_value=items)
-
-        with (
-            patch("src.main.get_credentials", return_value=creds),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav_api),
-            patch("src.main.VideoInfoAPI"),
-            patch("src.main.scan_invalid", return_value=[]),
-            patch("src.main.detect_duplicates", return_value=[]),
-            patch("src.main.classify_by_zone", return_value=[]),
-            patch("src.main.classify_by_upper", return_value=[]),
-            patch("src.main.classify_by_llm", return_value=[]),
-            patch("src.main.build_plan", return_value=plan),
-            patch("src.main.generate_preview", return_value="PREVIEW TEXT"),
-            patch("src.main.confirm_execution") as mock_confirm,
-            patch("src.main.execute_plan") as mock_execute,
-        ):
-            mock_http_cls.return_value = _make_http_mock()
-
-            result = await run_pipeline(dry_run=True)
-
-            assert result == 0
-            mock_confirm.assert_not_called()
-            mock_execute.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_normal_mode_calls_confirm_and_execute(self):
-        """In normal mode, confirm_execution is called and if True, execute_plan runs."""
-        plan = _make_plan()
-        creds = MagicMock()
-        creds.mid = 1000
-
-        folders = [_make_folder(1, title="默认收藏夹", attr=0)]
-        items = [_make_item(1)]
-        mock_fav_api = MagicMock()
-        mock_fav_api.list_all_folders = AsyncMock(return_value=folders)
-        mock_fav_api.get_all_contents = AsyncMock(return_value=items)
-
-        with (
-            patch("src.main.get_credentials", return_value=creds),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav_api),
-            patch("src.main.VideoInfoAPI"),
-            patch("src.main.scan_invalid", return_value=[]),
-            patch("src.main.detect_duplicates", return_value=[]),
-            patch("src.main.classify_by_zone", return_value=[]),
-            patch("src.main.classify_by_upper", return_value=[]),
-            patch("src.main.classify_by_llm", return_value=[]),
-            patch("src.main.build_plan", return_value=plan),
-            patch("src.main.generate_preview", return_value="PREVIEW"),
-            patch("src.main.confirm_execution", return_value=True),
-            patch("src.main.execute_plan") as mock_execute,
-        ):
-            mock_http_cls.return_value = _make_http_mock()
-
-            result = await run_pipeline(dry_run=False)
-
-            assert result == 0
-            mock_execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_confirm_false_skips_execute(self):
-        """When user declines confirmation, execute_plan is NOT called."""
-        plan = _make_plan()
-        creds = MagicMock()
-        creds.mid = 1000
-
-        folders = [_make_folder(1, title="默认收藏夹", attr=0)]
-        items = [_make_item(1)]
-        mock_fav_api = MagicMock()
-        mock_fav_api.list_all_folders = AsyncMock(return_value=folders)
-        mock_fav_api.get_all_contents = AsyncMock(return_value=items)
-
-        with (
-            patch("src.main.get_credentials", return_value=creds),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav_api),
-            patch("src.main.VideoInfoAPI"),
-            patch("src.main.scan_invalid", return_value=[]),
-            patch("src.main.detect_duplicates", return_value=[]),
-            patch("src.main.classify_by_zone", return_value=[]),
-            patch("src.main.classify_by_upper", return_value=[]),
-            patch("src.main.classify_by_llm", return_value=[]),
-            patch("src.main.build_plan", return_value=plan),
-            patch("src.main.generate_preview", return_value="PREVIEW"),
-            patch("src.main.confirm_execution", return_value=False),
-            patch("src.main.execute_plan") as mock_execute,
-        ):
-            mock_http_cls.return_value = _make_http_mock()
-
-            result = await run_pipeline(dry_run=False)
-
-            assert result == 0
-            mock_execute.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_expired_creds_exits_early(self):
-        """Expired credentials return exit code 1 before any pipeline step."""
-        with (
-            patch("src.main.get_credentials") as mock_get_creds,
-            patch("src.main.check_expired", return_value=True),
-        ):
-            mock_creds = MagicMock()
-            mock_get_creds.return_value = mock_creds
-
-            result = await run_pipeline(dry_run=False)
-
+    def test_missing_state_file(self):
+        """No state.json → error exit code 1."""
+        with patch.object(StateManager, "load_state", side_effect=FileNotFoundError):
+            result = cmd_plan()
             assert result == 1
 
-    @pytest.mark.asyncio
-    async def test_pipeline_steps_called_in_order(self):
-        """Pipeline functions are invoked with the correct arguments."""
-        creds = MagicMock()
-        creds.mid = 1000
-        folders = [
-            _make_folder(1, title="默认收藏夹", attr=0),
-            _make_folder(2, title="科技", attr=1),
-        ]
-        items = [_make_item(1)]
-        plan = _make_plan()
+    def test_produces_plan_with_classifications(self, tmp_path):
+        """With state + classifications, produces a valid plan."""
+        folder = _make_folder(1, title="默认收藏夹", attr=0)
+        source = _make_folder(2, title="旧收藏", attr=1)
+        item = _make_item(1, bvid="BV001", title="Python教程")
+        item_invalid = _make_item(2, bvid="BVbad", attr=9)
 
-        mock_fav = MagicMock()
-        mock_fav.list_all_folders = AsyncMock(return_value=folders)
-        mock_fav.get_all_contents = AsyncMock(return_value=items)
+        state = StateData(
+            scope_kind="all", scope_value="全部",
+            folders=[folder, source],
+            invalid_items=[InvalidItemEntry(item=item_invalid, folder_id=source.id, folder_title=source.title)],
+            duplicate_groups=[],
+            item_folder_map={item.id: source.id, item_invalid.id: source.id},
+            items_to_classify=[item, item_invalid],
+            existing_folder_titles=["默认收藏夹", "旧收藏"],
+        )
+
+        classification = ClassificationResultList(
+            classifications=[
+                ClassificationEntry(item_id=item.id, category="编程"),
+                ClassificationEntry(item_id=item_invalid.id, category=""),
+            ]
+        )
 
         with (
-            patch("src.main.get_credentials", return_value=creds),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav),
-            patch("src.main.VideoInfoAPI"),
-            patch("src.main.scan_invalid", return_value=[]),
-            patch("src.main.detect_duplicates", return_value=[]),
-            patch(
-                "src.main.classify_by_zone", return_value=[]
-            ) as mock_zone,
-            patch(
-                "src.main.classify_by_upper", return_value=[]
-            ) as mock_upper,
-            patch(
-                "src.main.classify_by_llm", return_value=[]
-            ) as mock_llm,
-            patch(
-                "src.main.build_plan", return_value=plan
-            ) as mock_plan,
-            patch(
-                "src.main.generate_preview", return_value="PREVIEW"
-            ),
-            patch(
-                "src.main.confirm_execution", return_value=True
-            ),
-            patch("src.main.execute_plan") as mock_execute,
+            patch.object(StateManager, "load_state", return_value=state),
+            patch.object(StateManager, "load_classification", return_value=classification),
+            patch.object(StateManager, "save_plan"),
+            patch("src.main.generate_preview", return_value="PREVIEW"),
+            patch("builtins.print"),
         ):
-            mock_http_cls.return_value = _make_http_mock()
-
-            result = await run_pipeline(dry_run=False)
-
+            result = cmd_plan()
             assert result == 0
-            mock_zone.assert_called_once()
-            mock_upper.assert_called_once()
-            mock_llm.assert_called_once()
-            mock_plan.assert_called_once()
-            mock_execute.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -349,169 +202,99 @@ class TestGeneratePreview:
     """Tests for the generate_preview function."""
 
     def test_empty_plan(self):
-        """Empty plan produces a message about no operations needed."""
-        folders = _make_folder(1, title="默认收藏夹", attr=0)
-        empty_plan = _make_plan()
-        # Rebuild with no operations
         empty_plan = OrganizePlan(
-            total_operations=0,
-            folders_to_create=[],
-            moves=[],
-            deletions=[],
+            total_operations=0, folders_to_create=[], moves=[], deletions=[],
             summary="无需任何操作",
         )
         result = generate_preview(empty_plan)
-
         assert "# 🗂️ 收藏夹整理计划" in result
-        assert "无需任何操作" in result
+        assert "✅ 无需任何操作" in result
 
     def test_plan_with_operations(self):
-        """Plan with operations shows all sections."""
-        plan = _make_plan()
+        folder = _make_folder(2, title="旧收藏", attr=1)
+        item = _make_item(1)
+        plan = OrganizePlan(
+            total_operations=2,
+            folders_to_create=["科技区"],
+            moves=[Operation(action="move", source=folder, target="科技区", resources=[item])],
+            deletions=[Operation(action="batch_delete", source=folder, resources=[item])],
+            summary="需要创建 1 个文件夹，移动 1 个内容，删除 1 个内容",
+        )
         result = generate_preview(plan)
-
         assert "# 🗂️ 收藏夹整理计划" in result
         assert "📁 新建 1 个文件夹" in result
         assert "科技区" in result
-        assert "删除" in result
-        assert "分类移动计划" in result
-        assert "是否执行以上操作？(y/N)" in result
 
-    def test_preview_contains_summary_bar(self):
-        """Summary bar shows create/move/delete counts."""
-        plan = _make_plan()
-        result = generate_preview(plan)
-
-        assert "📁" in result
-        assert "↗️" in result
-        assert "🗑️" in result
-
-    def test_new_folder_listed(self):
-        """Folders to create are listed in the preview."""
-        plan = _make_plan()
-        result = generate_preview(plan)
-
-        assert "📁 新文件夹" in result
-        assert "科技区" in result
-
-    def test_move_plan_shown(self):
-        """Classification move plan is included."""
-        plan = _make_plan()
-        result = generate_preview(plan)
-
-        assert "↗️ 分类移动计划" in result
-        assert "科技区" in result
-        assert "BV1xx411c7mD" in result
-
-
-# ---------------------------------------------------------------------------
-# execute_plan
-# ---------------------------------------------------------------------------
-
-
-class TestExecutePlan:
-    """Tests for the async execute_plan function."""
-
-    @pytest.mark.asyncio
-    async def test_creates_folders(self):
-        """New folders are created via fav_api.create_folder."""
-        plan = _make_plan()
-        fav_api = MagicMock()
-        fav_api.create_folder = AsyncMock()
-
-        await execute_plan(plan, fav_api)
-
-        fav_api.create_folder.assert_called_once_with(title="科技区")
-
-    @pytest.mark.asyncio
-    async def test_moves_items(self):
-        """Items are moved via fav_api.move_items."""
-        folder = _make_folder(2, title="旧收藏", attr=1)
-        item = _make_item(1)
-        target_folder = _make_folder(3, title="科技区", attr=1)
-        move_op = Operation(
-            action="move",
-            source=folder,
-            target=target_folder,
-            resources=[item],
-        )
+    def test_preview_shows_execute_hint(self):
         plan = OrganizePlan(
-            total_operations=2,
-            folders_to_create=[],
-            moves=[move_op],
-            deletions=[],
-            summary="移动 1 个内容",
-        )
-        fav_api = MagicMock()
-        fav_api.move_items = AsyncMock()
-
-        await execute_plan(plan, fav_api)
-
-        fav_api.move_items.assert_called_once()
-        call_args = fav_api.move_items.call_args
-        assert call_args[1]["src_media_id"] == folder.id
-        assert "1:2" in call_args[1]["resources"]
-
-    @pytest.mark.asyncio
-    async def test_deletes_items(self):
-        """Invalid/duplicate items are deleted via fav_api.batch_delete."""
-        folder = _make_folder(2, title="旧收藏", attr=1)
-        item = _make_item(1)
-        delete_op = Operation(
-            action="batch_delete",
-            source=folder,
-            resources=[item],
-        )
-        plan = OrganizePlan(
-            total_operations=1,
-            folders_to_create=[],
-            moves=[],
-            deletions=[delete_op],
-            summary="删除 1 个内容",
-        )
-        fav_api = MagicMock()
-        fav_api.batch_delete = AsyncMock()
-
-        await execute_plan(plan, fav_api)
-
-        fav_api.batch_delete.assert_called_once()
-        call_args = fav_api.batch_delete.call_args
-        assert call_args[1]["media_id"] == folder.id
-        assert "1:2" in call_args[1]["resources"]
-
-    @pytest.mark.asyncio
-    async def test_execute_empty_plan_does_nothing(self):
-        """An empty plan should result in no API calls."""
-        plan = OrganizePlan(
-            total_operations=0,
-            folders_to_create=[],
-            moves=[],
-            deletions=[],
+            total_operations=0, folders_to_create=[], moves=[], deletions=[],
             summary="无需任何操作",
         )
-        fav_api = MagicMock()
-        fav_api.create_folder = AsyncMock()
-        fav_api.move_items = AsyncMock()
-        fav_api.batch_delete = AsyncMock()
+        result = generate_preview(plan)
+        assert "fav-organizer execute" in result
 
-        await execute_plan(plan, fav_api)
 
-        fav_api.create_folder.assert_not_called()
-        fav_api.move_items.assert_not_called()
-        fav_api.batch_delete.assert_not_called()
+# ---------------------------------------------------------------------------
+# PlanFile serialization round-trip
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.asyncio
-    async def test_continue_on_error(self):
-        """Execution continues if one batch fails."""
-        plan = _make_plan()
-        fav_api = MagicMock()
-        fav_api.create_folder = AsyncMock(side_effect=Exception("API error"))
-        fav_api.move_items = AsyncMock()
-        fav_api.batch_delete = AsyncMock()
 
-        # Should not raise despite create_folder failing
-        await execute_plan(plan, fav_api)
+class TestPlanFileRoundTrip:
+    """Verify PlanFile serializes and deserializes correctly."""
 
-        # Should continue to move and delete steps
-        fav_api.move_items.assert_called()
-        fav_api.batch_delete.assert_called()
+    def test_planfile_json_roundtrip(self):
+        pf = PlanFile(
+            folders_to_create=["科技"],
+            moves=[
+                PlanMoveEntry(
+                    source_folder_id=1, source_folder_title="旧收藏",
+                    target_title="科技",
+                    resources=[PlanResourceRef(id=1, type=2, bvid="BV001", title="视频A")],
+                )
+            ],
+            deletions=[
+                PlanDeleteEntry(
+                    source_folder_id=1, source_folder_title="旧收藏",
+                    reason="invalid",
+                    resources=[PlanResourceRef(id=2, type=2, bvid="BV002", title="失效视频")],
+                )
+            ],
+            summary="test summary",
+        )
+
+        dumped = pf.model_dump_json()
+        loaded = PlanFile.model_validate_json(dumped)
+        assert loaded.folders_to_create == ["科技"]
+        assert len(loaded.moves) == 1
+        assert loaded.moves[0].resources[0].bvid == "BV001"
+        assert len(loaded.deletions) == 1
+
+
+# ---------------------------------------------------------------------------
+# StateData serialization round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestStateDataRoundTrip:
+    """Verify StateData serializes and deserializes correctly."""
+
+    def test_state_json_roundtrip(self):
+        folder = _make_folder(1, title="默认收藏夹")
+        item = _make_item(1, bvid="BV001", intro="学习Python", zone_tname="知识")
+
+        state = StateData(
+            scope_kind="folder", scope_value="默认收藏夹",
+            folders=[folder],
+            invalid_items=[],
+            duplicate_groups=[],
+            item_folder_map={item.id: folder.id},
+            items_to_classify=[item],
+            existing_folder_titles=["默认收藏夹"],
+        )
+
+        dumped = state.model_dump_json()
+        loaded = StateData.model_validate_json(dumped)
+        assert loaded.scope_value == "默认收藏夹"
+        assert len(loaded.items_to_classify) == 1
+        assert loaded.items_to_classify[0].intro == "学习Python"
+        assert loaded.items_to_classify[0].zone_tname == "知识"

@@ -1,88 +1,128 @@
 ---
 name: fav-organizer
-description: B站（Bilibili）收藏夹自动整理工具。一键扫描、清理失效内容、去重、智能分类（按分区/UP主/LLM主题）你的收藏夹。当用户提到整理B站收藏、清理失效收藏、收藏夹分类、收藏夹去重、B站收藏管理、bilibili favorites整理时触发。即使没有明确说"收藏夹"，只要提到B站内容管理或收藏整理相关意图都应使用此技能。
+description: B站（Bilibili）收藏夹自动整理工具。一键扫描、清理失效内容、去重、LLM 智能分类你的收藏夹。当用户提到整理B站收藏、清理失效收藏、收藏夹分类、收藏夹去重、B站收藏管理、bilibili favorites整理时触发。
 ---
 
 # fav-organizer — B站收藏夹整理
 
-你协助用户整理 B站（Bilibili）收藏夹。核心工具是 `uv run fav-organizer`（位于当前 skill 目录），它提供完整管线：扫描 → 清理失效 → 去重 → 分类 → 预览 → 确认 → 执行。
+你协助用户整理 B站（Bilibili）收藏夹。工具采用三阶段管线：**classify → plan → execute**。
 
-## 安全第一
+## 三阶段工作流
 
-**始终先执行 dry run。** 在运行任何会修改收藏夹的操作之前，必须先用 `--dry-run` 生成预览，让用户审阅后再决定是否执行。
-
-## 执行命令
-
-```bash
-# 第一步：预览（不修改任何内容）
-uv run fav-organizer --dry-run
-
-# 用户确认后：执行整理
-uv run fav-organizer
+```
+classify (数据采集) → 分类结果.json (Agent 填写) → plan (生成计划) → execute (执行)
 ```
 
-所有命令在 skill 根目录（即本 SKILL.md 所在目录）下执行。
+### 阶段 1: classify — 扫描收藏夹，准备数据
 
-工具是交互式的——dry run 会展示完整的整理计划（Markdown 格式），包含统计摘要、失效内容清单、重复内容清单、分类移动计划、空文件夹建议，最后显示 `是否执行以上操作？(y/n)` 确认提示。
+```bash
+# 整理指定收藏夹
+uv run fav-organizer classify --folder "默认收藏夹"
+
+# 整理所有收藏夹
+uv run fav-organizer classify --all
+
+# 清除视频缓存后重新扫描
+uv run fav-organizer classify --all --clear-cache
+```
+
+**此阶段完成：**
+- 鉴权（二维码/环境变量/`.auth.json`）
+- 列出收藏夹内容
+- 扫描失效视频（UP主删除 / 平台删除）
+- 检测重复内容（默认文件夹 vs 命名文件夹）
+- 获取视频元数据（简介、分区），缓存到磁盘（30 天 TTL）
+- 输出 `state.json` + `classification_result.json` 模板
+
+### 阶段 2: Agent 填写分类
+
+阶段 1 输出 `classification_result.json`：
+
+```json
+{
+  "version": "1.0",
+  "classifications": [
+    {"item_id": 123, "category": ""},
+    {"item_id": 456, "category": ""}
+  ]
+}
+```
+
+**Agent 的职责：** 为每个 `item_id` 填写 `category`（2-6 个中文字），例如 `"编程"`、`"游戏攻略"`。
+
+Agent 可以使用 `src/classifier_llm.py` 中的 `build_classification_prompt()` 为每个 item 生成中文分类提示词（包含标题、简介、已有文件夹），调用 LLM 决策后调用 `validate_category()` 验证结果。
+
+### 阶段 3: plan — 生成整理计划
+
+```bash
+# 使用默认分类结果文件
+uv run fav-organizer plan
+
+# 指定外部分类结果文件
+uv run fav-organizer plan --classification my_result.json
+```
+
+**此阶段完成：**
+- 读取 `state.json` 和 `classification_result.json`
+- 合并分类结果，生成 `OrganizePlan`
+- 输出 `plan.json` + Markdown 预览
+- 用户可反复修改 `classification_result.json` 后重新 `plan`
+
+### 阶段 4: execute — 执行整理
+
+```bash
+# 执行默认计划
+uv run fav-organizer execute
+
+# 执行指定计划
+uv run fav-organizer execute --plan my_plan.json
+```
+
+**执行顺序：** 创建文件夹 → 移动内容（每批 ≤30）→ 删除失效/重复内容。单批失败不影响后续。
+
+## 中间文件格式
+
+所有中间数据存储在 `.fav-organizer/` 目录（gitignored）：
+
+| 文件 | 产生于 | 消费于 | 说明 |
+|------|--------|--------|------|
+| `state.json` | `classify` | `plan` | 完整扫描状态 |
+| `classification_result.json` | Agent 填写 | `plan` | LLM 分类结果 |
+| `plan.json` | `plan` | `execute` | 可执行计划 |
+| `video_cache.json` | `classify` | `classify` | 视频信息缓存（30 天 TTL） |
 
 ## 鉴权处理
 
-工具需要 B站 登录凭证。首次运行时会自动弹出二维码登录（打开浏览器显示 B站 扫码页面）。如果用户在无图形界面的环境（如 SSH），终端会输出 ASCII 二维码作为回退。
+凭证优先级：`.auth.json`（二维码登录）> 环境变量 > 自动触发登录。
 
-如果用户想手动配置凭证，指导他们设置环境变量：
-- `FAV_SESSDATA` — B站 会话凭证
-- `FAV_BILI_JCT` — CSRF 令牌
-- `FAV_BUVID3` — 设备指纹（可选）
+```bash
+export FAV_SESSDATA="..."
+export FAV_BILI_JCT="..."
+export FAV_BUVID3="..."  # 可选
+```
 
 获取方式：浏览器 DevTools (F12) → Application → Cookies → `.bilibili.com`
-
-凭证优先级：`.auth.json`（二维码登录自动生成）> 环境变量 > 自动触发登录。
-
-如果执行时遇到鉴权错误（如 `code=-101` 登录过期），引导用户重新扫码登录或更新环境变量，不要反复重试。
-
-## 工作流说明
-
-工具按以下管线执行，向用户解释各阶段的作用：
-
-1. **扫描收藏夹** — 获取用户所有收藏夹及其内容，跳过系统文件夹（如"稍后再看"）
-2. **清理失效** — 识别已删除的视频（UP主删除 / 平台删除），标记待清除
-3. **去重** — 检测默认收藏夹与命名文件夹之间的重复。命名文件夹间的重复保留（合法多分类），仅默认收藏夹中的重复标记删除
-4. **分类** — 三种策略按优先级合并：
-   - **LLM 智能分类**（最高优先级）：基于标题+简介，AI 判断 2-6 字中文类别名
-   - **分区归类**：调用视频 API 获取分区（tid），映射到 20 个主分区
-   - **UP主归类**（最低优先级）：按 UP主 名称精确分组
-5. **预览** — 生成 Markdown 格式整理计划供用户审阅
-6. **确认** — 等待用户输入 `y` 确认或 `n` 取消（60s 超时自动取消）
-7. **执行** — 先创建文件夹 → 移动内容 → 删除失效项，每批 ≤30 个资源，单批失败不影响后续
-
-## 向用户呈现结果
-
-Dry run 的输出是结构化的 Markdown。直接向用户展示预览内容，突出关键数字（创建 X 个文件夹、移动 Y 个内容、删除 Z 个失效项），并明确询问是否继续执行。
-
-## 限制（v1）
-
-- 不支持重命名/合并已有文件夹（仅创建新文件夹并归类）
-- 不提供回滚/撤销功能（预览即"回滚"，确认前不会修改任何内容）
-- 不操作他人创建的收藏夹（collected 文件夹）
-- UP主 名称采用精确匹配，不处理名称变体
-- 空文件夹仅标注"建议删除"，不自动删除
 
 ## 错误处理
 
 | 错误类型 | 处理方式 |
 |---------|---------|
-| 鉴权过期（code=-101） | 引导用户重新登录，不要反复重试 |
-| CSRF 校验失败（code=-111） | 提示 bili_jct 无效，建议更新凭证 |
-| 限流（HTTP 412/429） | 工具内置指数退避重试（等 60s → 最多 3 次），等待即可 |
-| 网络错误 | 工具内置重试 3 次，失败后向用户报告 |
-| API 错误 | 单批失败不影响后续（工具会记录失败项并继续），向用户展示最终结果时说明失败的项 |
+| 鉴权过期（code=-101） | 引导用户重新登录 |
+| CSRF 校验失败（code=-111） | 提示更新 bili_jct |
+| 限流（HTTP 412/429） | 指数退避重试（最多 3 次） |
+| 网络错误 | 重试 3 次，失败后报错 |
+| API 错误 | 单批失败不影响后续 |
+
+## 限制（v2）
+
+- LLM 分类为唯一分类器（无分区/UP主自动归类）
+- 不支持重命名/合并已有文件夹
+- 不提供回滚/撤销功能
+- 不操作他人创建的收藏夹
+- 空文件夹仅标注，不自动删除
 
 ## 依赖安装
-
-如果运行 `uv run fav-organizer` 时提示依赖缺失，先执行：
 
 ```bash
 uv sync
 ```
-
-（在 skill 根目录下执行）

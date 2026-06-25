@@ -1,17 +1,20 @@
 """LLM-based intelligent categorization for B站 favorites.
 
-Uses a configurable LLM callable to classify favorited items into
-2-6 character Chinese category names based on title and intro.
+The sole classifier for favorites organizer.  Uses a configurable LLM
+callable to classify favorited items into 2-6 character Chinese category
+names based on title, description (from video API), and existing folders.
 
-The default llm_func (interactive input) is a fallback for standalone
-testing; in production with OpenCode, the callable reads from session
-context.
+The default ``llm_func`` (interactive ``input()``) is a fallback for
+standalone testing; in production with OpenCode, the callable reads from
+session context.
 """
+
+from __future__ import annotations
 
 import re
 from typing import Callable
 
-from src.models import ClassificationResult, Folder, FavoritedItem
+from .models import ClassificationResult, Folder, FavoritedItem
 
 # ---------------------------------------------------------------------------
 # Validation helpers
@@ -22,7 +25,7 @@ _CHINESE_CHAR = re.compile(r"[\u4e00-\u9fff]")
 _VALID_CATEGORY = re.compile(r"^[\u4e00-\u9fff]{2,6}$")
 
 
-def _validate_category(response: str) -> str | None:
+def validate_category(response: str) -> str | None:
     """Validate an LLM response as a valid category name.
 
     Rules (in order):
@@ -57,18 +60,31 @@ def _validate_category(response: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _build_prompt(item: FavoritedItem, existing_titles: list[str]) -> str:
-    """Build the Chinese prompt for LLM classification."""
-    intro = getattr(item, "intro", None) or "无"
+def build_classification_prompt(
+    item: FavoritedItem,
+    existing_titles: list[str],
+) -> str:
+    """Build the Chinese prompt for LLM classification.
+
+    Includes video description (intro) and zone context when available.
+    """
+    intro = item.intro or "无"
+    zone_hint = f"\n分区：{item.zone_tname}" if item.zone_tname else ""
     titles_str = "、".join(existing_titles) if existing_titles else "无"
 
-    return (
-        f"根据以下B站视频的标题和简介，判断最合适的主题类别名称（2-6个中文字）。\n"
-        f"标题：{item.title}\n"
-        f"简介：{intro}\n"
-        f"已有文件夹：{titles_str}\n"
-        f"请优先归入已有文件夹，若无匹配则给出新类别名。"
-    )
+    parts = [
+        f"根据以下B站视频的标题和简介，判断最合适的主题类别名称（2-6个中文字）。",
+        f"标题：{item.title}",
+        f"简介：{intro}",
+    ]
+    if zone_hint:
+        parts.append(zone_hint.strip())
+    parts.extend([
+        f"已有文件夹：{titles_str}",
+        f"请优先归入已有文件夹，若无匹配则给出新类别名。",
+    ])
+
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -89,23 +105,22 @@ def _default_llm_func(prompt: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def classify_by_llm(
+def classify_items(
     items: list[FavoritedItem],
     existing_folders: list[Folder],
     llm_func: Callable[[str], str] | None = None,
 ) -> list[ClassificationResult]:
     """Classify favorited items using an LLM callable.
 
-    For each item that has **not** already been classified by the zone or
-    upper-name classifiers, builds a Chinese prompt and invokes
-    *llm_func*.  The response is validated (2–6 Chinese characters,
-    no special characters); invalid responses fall back to ``"未分类"``.
+    For each item, builds a Chinese prompt (including video description
+    and zone context when available) and invokes *llm_func*.  The
+    response is validated (2–6 Chinese characters, no special
+    characters); invalid responses fall back to ``"未分类"``.
 
     Args:
         items:
-            Favorited items to classify.  Items with ``type != 2``
-            (non-video) are silently skipped — the zone classifier
-            already handles them as ``"其他"``.
+            Favorited items to classify.  All item types are processed
+            (video items get richer prompts via intro/zone_tname).
         existing_folders:
             Current folder list.  Folder titles are included in the
             prompt so the LLM can prefer matching existing folders.
@@ -115,9 +130,7 @@ def classify_by_llm(
             ``input()`` fallback is used (standalone mode).
 
     Returns:
-        One ``ClassificationResult`` per processed item.  The result's
-        ``target_folder_exists`` field is ``True`` when the returned
-        category matches an existing folder title.
+        One ``ClassificationResult`` per processed item.
     """
     if llm_func is None:
         llm_func = _default_llm_func
@@ -126,13 +139,9 @@ def classify_by_llm(
     results: list[ClassificationResult] = []
 
     for item in items:
-        # Non-video items are handled by the zone classifier ("其他")
-        if item.type != 2:
-            continue
-
-        prompt = _build_prompt(item, existing_titles)
+        prompt = build_classification_prompt(item, existing_titles)
         response = llm_func(prompt)
-        category = _validate_category(response)
+        category = validate_category(response)
 
         if category is None:
             category = "未分类"

@@ -8,6 +8,11 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Core domain models (API shapes)
+# ──────────────────────────────────────────────────────────────────────
+
+
 class Folder(BaseModel):
     """A Bilibili favorites folder (收藏夹).
 
@@ -47,6 +52,9 @@ class FavoritedItem(BaseModel):
     upper_mid: int
     attr: int
     fav_time: int
+    # Populated during classify phase from video API (not in fav API response)
+    intro: str = ""
+    zone_tname: str = ""
 
     @property
     def is_valid(self) -> bool:
@@ -136,3 +144,102 @@ class Credentials(BaseModel):
     bili_jct: str
     buvid3: str = ""
     mid: int = 0
+
+
+# ──────────────────────────────────────────────────────────────────────
+# File-based state models (JSON serialization between pipeline stages)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class InvalidItemEntry(BaseModel):
+    """An invalid item with its source folder reference (for state.json)."""
+
+    item: FavoritedItem
+    folder_id: int
+    folder_title: str
+
+
+class StateData(BaseModel):
+    """Complete state produced by the ``classify`` command.
+
+    Serialized to ``.fav-organizer/state.json``.  Contains everything
+    the ``plan`` command needs to build an OrganizePlan once LLM
+    classifications have been filled in.
+    """
+
+    version: str = "1.0"
+    scope_kind: str  # "all" or "folder"
+    scope_value: str  # folder title (or "全部" for --all)
+    folders: list[Folder]
+    invalid_items: list[InvalidItemEntry]
+    duplicate_groups: list[DuplicateGroup]
+    item_folder_map: dict[int, int]  # item_id → folder_id
+    items_to_classify: list[FavoritedItem]  # with intro/zone_tname populated
+    existing_folder_titles: list[str]
+
+
+class ClassificationEntry(BaseModel):
+    """One LLM classification decision (agent fills this in)."""
+
+    item_id: int
+    category: str  # 2-6 Chinese characters
+
+
+class ClassificationResultList(BaseModel):
+    """User/agent-filled LLM classifications.
+
+    Serialized to ``.fav-organizer/classification_result.json``.
+    The ``plan`` command reads this and merges with state.json to build
+    the OrganizePlan.
+    """
+
+    version: str = "1.0"
+    classifications: list[ClassificationEntry]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Plan serialization (for execute command)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class PlanResourceRef(BaseModel):
+    """Lightweight reference to a favorited item for plan serialization."""
+
+    id: int
+    type: int
+    bvid: str
+    title: str
+
+
+class PlanMoveEntry(BaseModel):
+    """A move operation in serialized form."""
+
+    source_folder_id: int
+    source_folder_title: str
+    target_title: str
+    resources: list[PlanResourceRef]
+
+
+class PlanDeleteEntry(BaseModel):
+    """A delete operation in serialized form."""
+
+    source_folder_id: int
+    source_folder_title: str
+    reason: str  # "invalid" | "duplicate"
+    resources: list[PlanResourceRef]
+
+
+class PlanFile(BaseModel):
+    """Serializable organize plan for the ``execute`` command.
+
+    Serialized to ``.fav-organizer/plan.json``.  Uses simple types
+    (no nested Folder/FavoritedItem unions) for unambiguous
+    deserialization.
+    """
+
+    version: str = "1.0"
+    folders_to_create: list[str]
+    moves: list[PlanMoveEntry]
+    deletions: list[PlanDeleteEntry]
+    empty_folders: list[str] = []
+    summary: str = ""

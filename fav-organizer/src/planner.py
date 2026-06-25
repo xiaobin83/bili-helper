@@ -1,17 +1,16 @@
-"""Operation planner — consolidates classifier outputs into an OrganizePlan.
+"""Operation planner — converts LLM classifications into an OrganizePlan.
 
-Resolves conflicts between classifiers, generates create/move/delete operations,
-detects folders that would become empty, and produces a human-readable summary.
+Resolves classification results into create/move/delete operations,
+detects folders that would become empty, and produces a human-readable
+summary.
 
 Usage::
 
     plan = build_plan(
-        zone_results=zone_classifications,
-        upper_results=upper_classifications,
-        llm_results=llm_classifications,
+        classifications=llm_classifications,
         existing_folders=folders,
-        invalid_items=scanner_results,
-        duplicate_groups=dedup_results,
+        invalid_items=invalid_items,
+        duplicate_groups=duplicate_groups,
         item_folder_map=item_to_folder,
     )
     print(plan.summary)
@@ -21,7 +20,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from src.models import (
+from .models import (
     ClassificationResult,
     DuplicateGroup,
     FavoritedItem,
@@ -32,23 +31,17 @@ from src.models import (
 
 
 def build_plan(
-    zone_results: list[ClassificationResult],
-    upper_results: list[ClassificationResult],
-    llm_results: list[ClassificationResult],
+    classifications: list[ClassificationResult],
     existing_folders: list[Folder],
     invalid_items: list[tuple[FavoritedItem, Folder]],
     duplicate_groups: list[DuplicateGroup],
     item_folder_map: dict[int, Folder],
 ) -> OrganizePlan:
-    """Consolidate all classifier outputs into a unified OrganizePlan.
+    """Consolidate LLM classifier output into a unified OrganizePlan.
 
     Parameters
     ----------
-    zone_results:
-        Classification results from the zone (partition) classifier.
-    upper_results:
-        Classification results from the UP主-name classifier.
-    llm_results:
+    classifications:
         Classification results from the LLM classifier.
     existing_folders:
         Current favorite folders owned by the user.
@@ -66,20 +59,10 @@ def build_plan(
         A complete plan with all operations, stats, and a Chinese summary.
     """
     # ------------------------------------------------------------------
-    # Step 1 — Conflict resolution: LLM > Zone > UP主
+    # Step 1 — Build merged classification dict
     # ------------------------------------------------------------------
     merged: dict[int, ClassificationResult] = {}
-
-    # Lowest priority: UP主 classifier
-    for r in upper_results:
-        merged[r.item.id] = r
-
-    # Medium priority: Zone classifier (overwrites UP主)
-    for r in zone_results:
-        merged[r.item.id] = r
-
-    # Highest priority: LLM classifier (overwrites Zone / UP主)
-    for r in llm_results:
+    for r in classifications:
         merged[r.item.id] = r
 
     # ------------------------------------------------------------------
@@ -130,9 +113,7 @@ def build_plan(
     move_ops: list[Operation] = []
     for (src_id, target_title), items in move_groups.items():
         source_folder = item_folder_map.get(items[0].id)
-        # source_folder should always be found here since we used it as the key
         if source_folder is None:
-            # Fallback: find the folder by id
             source_folder = next(
                 (f for f in existing_folders if f.id == src_id), None
             )
@@ -171,7 +152,6 @@ def build_plan(
     # Step 6 — Generate batch_delete for duplicate items in default folder
     # ------------------------------------------------------------------
     if duplicate_groups:
-        # All duplicates from dedup are in the default folder
         dup_source_folders: dict[int, list[FavoritedItem]] = defaultdict(list)
         dup_folder_ref: dict[int, Folder] = {}
         for dg in duplicate_groups:
@@ -192,8 +172,6 @@ def build_plan(
     # ------------------------------------------------------------------
     # Step 7 — Empty folder detection
     # ------------------------------------------------------------------
-    # After all moves, check which folders would become empty.
-    # A folder is empty if all its items are either moved out or deleted.
     moved_item_ids: set[int] = set()
     for op in move_ops:
         for item in op.resources:
@@ -204,17 +182,8 @@ def build_plan(
         for item in op.resources:
             deleted_item_ids.add(item.id)
 
-    # For each source folder involved in moves, check if it becomes empty
-    # We can detect by checking if the folder has items other than the moved ones.
-    # Since we don't have the full folder contents here, we detect based on what
-    # we know: if ALL items we know about from a folder are moved/deleted.
-    # Note: this is a best-effort detection based on available information.
-
-    # Collect per-folder item counts from item_folder_map
-    folder_item_counts: dict[int, int] = defaultdict(int)
     folder_item_ids: dict[int, set[int]] = defaultdict(set)
     for item_id, folder in item_folder_map.items():
-        folder_item_counts[folder.id] += 1
         folder_item_ids[folder.id].add(item_id)
 
     empty_folder_ids: set[int] = set()
