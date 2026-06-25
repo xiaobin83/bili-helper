@@ -1,0 +1,5 @@
+*.pyc
+__pycache__/
+.auth.json
+.pytest_cache/
+.coverage
