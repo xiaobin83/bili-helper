@@ -158,6 +158,39 @@ def generate_preview(plan: OrganizePlan) -> str:
 # ======================================================================
 
 
+async def _collect_until_count(
+    fav_api: FavAPI,
+    folder: Folder,
+    all_items: list[FavoritedItem],
+    item_folder_map: dict[int, int],
+    remaining: int,
+) -> tuple[int, list[FavoritedItem]]:
+    """Paginate through folder contents until *remaining* video items are collected.
+
+    Deducts 1 from *remaining* for each valid video (type==2) found.
+    Stops early once remaining ≤ 0. Returns (remaining, collected_items).
+    """
+    page = 1
+    collected: list[FavoritedItem] = []
+    while True:
+        page_items, has_more = await fav_api.get_folder_contents(
+            media_id=folder.id, page=page,
+        )
+        for item in page_items:
+            collected.append(item)
+            if item.is_valid:
+                all_items.append(item)
+                item_folder_map[item.id] = folder.id
+                if item.type == 2:
+                    remaining -= 1
+                if remaining <= 0:
+                    break
+        if not has_more or remaining <= 0:
+            break
+        page += 1
+    return remaining, collected
+
+
 async def cmd_classify(
     *,
     scope_kind: str,
@@ -245,32 +278,35 @@ async def cmd_classify(
         # Collect all valid items with their source folder mapping
         all_items: list[FavoritedItem] = []
         item_folder_map: dict[int, int] = {}
-        item_folder_map_full: dict[int, Folder] = {}
 
-        for i, folder in enumerate(folders, 1):
-            if folder.title == "稍后再看":
-                continue
-            contents = await fav_api.get_all_contents(media_id=folder.id)
-            valid_count = 0
-            for item in contents:
-                if item.is_valid:
-                    all_items.append(item)
-                    item_folder_map[item.id] = folder.id
-                    item_folder_map_full[item.id] = folder
-                    valid_count += 1
-            print(f"  [{i}/{len(folders)}] 📂 {folder.title}: {len(contents)} 个内容 ({valid_count} 有效)")
-
-        print(f"共 {len(all_items)} 个有效内容待分类")
-
-        if count is not None and count < len(all_items):
-            all_items = all_items[:count]
-            trimmed_ids = {it.id for it in all_items}
-            item_folder_map = {
-                item_id: fid
-                for item_id, fid in item_folder_map.items()
-                if item_id in trimmed_ids
-            }
-            print(f"  ⚠️  --count={count}: 仅处理前 {count} 个")
+        if count is not None:
+            remaining = count
+            for i, folder in enumerate(folders, 1):
+                if folder.title == "稍后再看":
+                    continue
+                remaining, more_items = await _collect_until_count(
+                    fav_api, folder, all_items, item_folder_map, remaining
+                )
+                folder_items = len(more_items)
+                folder_valid = sum(1 for it in more_items if it.is_valid)
+                print(f"  [{i}/{len(folders)}] 📂 {folder.title}: {folder_items} 个内容 ({folder_valid} 有效)")
+                if remaining <= 0:
+                    remaining_folders = len(folders) - i
+                    if remaining_folders:
+                        print(f"  ⏭  已收集足够视频，跳过剩余 {remaining_folders} 个收藏夹")
+                    break
+        else:
+            for i, folder in enumerate(folders, 1):
+                if folder.title == "稍后再看":
+                    continue
+                contents = await fav_api.get_all_contents(media_id=folder.id)
+                valid_count = 0
+                for item in contents:
+                    if item.is_valid:
+                        all_items.append(item)
+                        item_folder_map[item.id] = folder.id
+                        valid_count += 1
+                print(f"  [{i}/{len(folders)}] 📂 {folder.title}: {len(contents)} 个内容 ({valid_count} 有效)")
 
         # Fetch video info to enrich items with descriptions
         print(f"正在获取视频信息 ({len(all_items)} 个)...")
