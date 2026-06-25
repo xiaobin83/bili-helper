@@ -24,6 +24,9 @@ uv run fav-organizer classify --all
 
 # 清除视频缓存后重新扫描
 uv run fav-organizer classify --all --clear-cache
+
+# 仅整理前 N 个收藏内容
+uv run fav-organizer classify --folder "默认收藏夹" --count 20
 ```
 
 **此阶段完成：**
