@@ -367,7 +367,8 @@ async def cmd_classify(
             classifications=[
                 ClassificationEntry(item_id=it.id, category="")
                 for it in all_items
-            ]
+            ],
+            existing_folder_titles=existing_titles,
         )
         class_path = mgr.save_classification(empty_classification)
 
@@ -636,6 +637,51 @@ async def cmd_execute(*, plan_path: str | None = None) -> int:
         await http.close()
 
 
+async def cmd_delete_empty() -> int:
+    """Scan all folders, delete those with zero items.
+
+    Skips the default folder (B站 does not allow deleting it).
+    """
+    creds = get_credentials()
+    if check_expired(creds):
+        print("❌ 登录已过期，请重新获取 SESSDATA")
+        return 1
+
+    http = BiliHTTPClient(sessdata=creds.sessdata, bili_jct=creds.bili_jct)
+    try:
+        fav_api = FavAPI(
+            http_client=http,
+            bili_jct=creds.bili_jct,
+            signing=sign_params,
+        )
+
+        folders = await fav_api.list_all_folders(up_mid=creds.mid)
+        empty = [
+            f for f in folders
+            if f.media_count == 0 and not f.is_default and f.title != "稍后再看"
+        ]
+
+        if not empty:
+            print("✅ 没有空收藏夹")
+            return 0
+
+        print(f"发现 {len(empty)} 个空收藏夹:")
+        for f in empty:
+            print(f"  📂 {f.title}")
+
+        if not confirm_execution(f"删除以上 {len(empty)} 个空收藏夹？"):
+            print("已取消")
+            return 0
+
+        media_ids = [f.id for f in empty]
+        await fav_api.delete_folders(media_ids)
+        print(f"✅ 已删除 {len(empty)} 个空收藏夹")
+        return 0
+
+    finally:
+        await http.close()
+
+
 async def _execute_plan_file(
     plan_file: PlanFile,
     fav_api: FavAPI,
@@ -643,21 +689,30 @@ async def _execute_plan_file(
 ) -> None:
     """Execute a PlanFile against the B站 API.
 
-    Order: create folders → move items → delete items.
+    Order: collect existing folders → create folders → move items →
+    delete items.
     Batches of ≤30 resources. Failures logged but don't stop execution.
     """
-    total_steps = 0
+    BATCH = 30
     step = 0
 
-    # Count steps
+    # ── Phase 0: Collect existing folder id↔title mappings ──────────
+    title_to_id: dict[str, int] = {}
+    try:
+        existing = await fav_api.list_all_folders(up_mid=mid)
+        for f in existing:
+            title_to_id[f.title] = f.id
+    except Exception as exc:
+        print(f"⚠️  获取已有文件夹失败: {exc}")
+
+    # ── Count total steps ───────────────────────────────────────────
     total_steps = len(plan_file.folders_to_create)
     for m in plan_file.moves:
-        total_steps += max((len(m.resources) + 29) // 30, 0)
+        total_steps += max((len(m.resources) + BATCH - 1) // BATCH, 0)
     for d in plan_file.deletions:
-        total_steps += max((len(d.resources) + 29) // 30, 0)
+        total_steps += max((len(d.resources) + BATCH - 1) // BATCH, 0)
 
-    # Phase 1: Create folders
-    title_to_id: dict[str, int] = {}
+    # ── Phase 1: Create folders ─────────────────────────────────────
     for title in plan_file.folders_to_create:
         step += 1
         try:
@@ -669,15 +724,13 @@ async def _execute_plan_file(
         except Exception as exc:
             print(f"⚠️  创建文件夹 '{title}' 失败: {exc}")
 
-    # Phase 2: Move items
-    BATCH = 30
+    # ── Phase 2: Move items ─────────────────────────────────────────
     for m in plan_file.moves:
         if not m.resources:
             continue
 
         tar_id = title_to_id.get(m.target_title, 0)
         if tar_id == 0:
-            # Target might be an existing folder not in folders_to_create
             print(f"⚠️  目标文件夹 '{m.target_title}' 不存在，跳过移动")
             continue
 
@@ -699,7 +752,7 @@ async def _execute_plan_file(
             except Exception as exc:
                 print(f"⚠️  移动失败: {exc}")
 
-    # Phase 3: Delete items
+    # ── Phase 3: Delete items ───────────────────────────────────────
     for d in plan_file.deletions:
         if not d.resources:
             continue
@@ -771,6 +824,8 @@ def cli() -> None:
         help="计划 JSON 文件路径（默认: .fav-organizer/plan.json）",
     )
 
+    sub.add_parser("delete-empty", help="删除所有空收藏夹（跳过默认收藏夹）")
+
     args = parser.parse_args()
 
     if args.command == "classify":
@@ -787,6 +842,8 @@ def cli() -> None:
         sys.exit(cmd_plan(classification_path=args.classification))
     elif args.command == "execute":
         sys.exit(asyncio.run(cmd_execute(plan_path=args.plan)))
+    elif args.command == "delete-empty":
+        sys.exit(asyncio.run(cmd_delete_empty()))
     else:
         parser.print_help()
         sys.exit(1)

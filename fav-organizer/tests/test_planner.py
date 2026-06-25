@@ -102,7 +102,7 @@ def test_creates_folder_when_target_does_not_exist():
 
     assert len(plan.folders_to_create) == 1
     assert "科技" in plan.folders_to_create
-    assert plan.total_operations == 1
+    assert plan.total_operations == 2  # create_folder + move (default folder now allows moves)
 
 
 def test_no_create_when_target_exists():
@@ -143,8 +143,8 @@ def test_moves_item_from_non_default_to_target():
     assert len(plan.moves[0].resources) == 1
 
 
-def test_no_move_when_item_in_default_folder():
-    """Items in the default folder are NOT moved, even if classified."""
+def test_move_when_item_in_default_folder():
+    """Items in the default folder ARE moved when classified to a different folder."""
     item = _make_item(1)
     default = _make_folder(1, title="默认收藏夹", attr=0)
     classifications = [_make_classification(item, category="科技")]
@@ -157,7 +157,9 @@ def test_no_move_when_item_in_default_folder():
         item_folder_map={item.id: default},
     )
 
-    assert len(plan.moves) == 0
+    assert len(plan.moves) == 1
+    assert plan.moves[0].source == default
+    assert plan.moves[0].target == "科技"
 
 
 def test_no_move_when_already_in_target():

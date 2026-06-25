@@ -264,6 +264,17 @@ class FavAPI:
             },
         )
 
+    async def delete_folders(self, media_ids: list[int]) -> dict:
+        """Delete one or more favourite folders.
+
+        Calls ``POST /x/v3/fav/folder/del`` with comma-separated
+        ``media_ids`` (upstream supports multiple ids in one request).
+        """
+        return await self._post(
+            "/x/v3/fav/folder/del",
+            {"media_ids": ",".join(str(m) for m in media_ids)},
+        )
+
     async def clean_invalid(self, media_id: int) -> dict:
         """Remove every invalid/deleted item from a folder.
 

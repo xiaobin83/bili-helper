@@ -78,7 +78,7 @@ class Operation(BaseModel):
     create), or None (for deletions without a target).
     """
 
-    action: Literal["create_folder", "move", "copy", "batch_delete", "clean"]
+    action: Literal["create_folder", "move", "copy", "batch_delete", "clean", "delete_folder"]
     source: Folder | None = None
     target: Folder | str | None = None
     resources: list[FavoritedItem] = []
@@ -195,6 +195,7 @@ class ClassificationResultList(BaseModel):
 
     version: str = "1.0"
     classifications: list[ClassificationEntry]
+    existing_folder_titles: list[str] = []
 
 
 # ──────────────────────────────────────────────────────────────────────

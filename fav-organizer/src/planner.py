@@ -101,10 +101,8 @@ def build_plan(
         if source_folder is None:
             continue  # no source folder info → cannot move
 
-        # Skip items already in the target folder, or in the default folder
+        # Skip items already in the target folder
         if source_folder.title == result.target_folder_title:
-            continue
-        if source_folder.is_default:
             continue
 
         key = (source_folder.id, result.target_folder_title)
