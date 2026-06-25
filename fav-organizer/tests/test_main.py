@@ -96,7 +96,7 @@ class TestCli:
             mock_cmd.return_value = 0
             cli()
             mock_cmd.assert_called_once_with(
-                scope_kind="folder", scope_value="默认收藏夹", clear_cache=False
+                scope_kind="folder", scope_value="默认收藏夹", clear_cache=False, count=None
             )
 
     def test_classify_all(self):
@@ -109,7 +109,7 @@ class TestCli:
             mock_cmd.return_value = 0
             cli()
             mock_cmd.assert_called_once_with(
-                scope_kind="all", scope_value="全部", clear_cache=False
+                scope_kind="all", scope_value="全部", clear_cache=False, count=None
             )
 
     def test_plan_subcommand(self):
@@ -133,6 +133,19 @@ class TestCli:
             mock_cmd.return_value = 0
             cli()
             mock_cmd.assert_called_once_with(plan_path=None)
+
+    def test_classify_with_count(self):
+        """--count N is forwarded to cmd_classify."""
+        with (
+            patch("src.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
+            patch("src.main.sys.exit"),
+            patch("src.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹", "--count", "10"]),
+        ):
+            mock_cmd.return_value = 0
+            cli()
+            mock_cmd.assert_called_once_with(
+                scope_kind="folder", scope_value="默认收藏夹", clear_cache=False, count=10
+            )
 
     def test_no_subcommand_shows_help(self):
         """No subcommand prints help."""

@@ -163,6 +163,7 @@ async def cmd_classify(
     scope_kind: str,
     scope_value: str,
     clear_cache: bool = False,
+    count: int | None = None,
 ) -> int:
     """Scan favorites, detect invalid/duplicate, and prepare state for LLM classification.
 
@@ -256,6 +257,16 @@ async def cmd_classify(
             print(f"  [{i}/{len(folders)}] 📂 {folder.title}: {len(contents)} 个内容 ({valid_count} 有效)")
 
         print(f"共 {len(all_items)} 个有效内容待分类")
+
+        if count is not None and count < len(all_items):
+            all_items = all_items[:count]
+            trimmed_ids = {it.id for it in all_items}
+            item_folder_map = {
+                item_id: fid
+                for item_id, fid in item_folder_map.items()
+                if item_id in trimmed_ids
+            }
+            print(f"  ⚠️  --count={count}: 仅处理前 {count} 个")
 
         # Fetch video info to enrich items with descriptions
         print(f"正在获取视频信息 ({len(all_items)} 个)...")
@@ -682,6 +693,10 @@ def cli() -> None:
         "--clear-cache", action="store_true",
         help="清除视频信息磁盘缓存后重新获取",
     )
+    p_classify.add_argument(
+        "--count", type=int, metavar="N",
+        help="仅整理前 N 个收藏内容（默认：全部）",
+    )
 
     # plan
     p_plan = sub.add_parser("plan", help="读取分类结果，生成整理计划")
@@ -706,6 +721,7 @@ def cli() -> None:
             scope_kind=scope_kind,
             scope_value=scope_value,
             clear_cache=args.clear_cache,
+            count=args.count,
         )))
     elif args.command == "plan":
         sys.exit(cmd_plan(classification_path=args.classification))
