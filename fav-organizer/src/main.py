@@ -163,11 +163,13 @@ async def _collect_until_count(
     folder: Folder,
     all_items: list[FavoritedItem],
     item_folder_map: dict[int, int],
+    invalid_entries: list[InvalidItemEntry],
     remaining: int,
 ) -> tuple[int, list[FavoritedItem]]:
     """Paginate through folder contents until *remaining* video items are collected.
 
     Deducts 1 from *remaining* for each valid video (type==2) found.
+    Collects invalid items (attr != 0) into *invalid_entries* inline.
     Stops early once remaining ≤ 0. Returns (remaining, collected_items).
     """
     page = 1
@@ -185,6 +187,12 @@ async def _collect_until_count(
                     remaining -= 1
                 if remaining <= 0:
                     break
+            else:
+                invalid_entries.append(InvalidItemEntry(
+                    item=item,
+                    folder_id=folder.id,
+                    folder_title=folder.title,
+                ))
         if not has_more or remaining <= 0:
             break
         page += 1
@@ -254,18 +262,20 @@ async def cmd_classify(
         print(f"📂 整理范围: {scope_value} ({len(folders)} 个收藏夹)")
 
         # Scan invalid
-        print(f"正在扫描失效内容 ({len(folders)} 个收藏夹)...")
-        invalid_pairs = await scan_invalid(folders, fav_api)
-        print(f"  发现 {len(invalid_pairs)} 个失效内容")
-
-        # Build invalid items for state
         invalid_entries: list[InvalidItemEntry] = []
-        for item, folder in invalid_pairs:
-            invalid_entries.append(InvalidItemEntry(
-                item=item,
-                folder_id=folder.id,
-                folder_title=folder.title,
-            ))
+
+        if count is not None:
+            pass  # invalid items collected inline below
+        else:
+            print(f"正在扫描失效内容 ({len(folders)} 个收藏夹)...")
+            invalid_pairs = await scan_invalid(folders, fav_api)
+            print(f"  发现 {len(invalid_pairs)} 个失效内容")
+            for item, folder in invalid_pairs:
+                invalid_entries.append(InvalidItemEntry(
+                    item=item,
+                    folder_id=folder.id,
+                    folder_title=folder.title,
+                ))
 
         # Dedup
         if dedup:
@@ -285,7 +295,8 @@ async def cmd_classify(
                 if folder.title == "稍后再看":
                     continue
                 remaining, more_items = await _collect_until_count(
-                    fav_api, folder, all_items, item_folder_map, remaining
+                    fav_api, folder, all_items, item_folder_map,
+                    invalid_entries, remaining,
                 )
                 folder_items = len(more_items)
                 folder_valid = sum(1 for it in more_items if it.is_valid)
@@ -307,6 +318,10 @@ async def cmd_classify(
                         item_folder_map[item.id] = folder.id
                         valid_count += 1
                 print(f"  [{i}/{len(folders)}] 📂 {folder.title}: {len(contents)} 个内容 ({valid_count} 有效)")
+
+        print(f"共 {len(all_items)} 个有效内容待分类")
+        if count is not None:
+            print(f"  发现 {len(invalid_entries)} 个失效内容（来自已扫描页面）")
 
         # Fetch video info to enrich items with descriptions
         print(f"正在获取视频信息 ({len(all_items)} 个)...")
