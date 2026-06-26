@@ -349,11 +349,11 @@ async def cmd_classify(
         print(f"  ✅ 视频信息: {cached_count} 来自缓存, {fetched_count} 新获取")
 
         # Build and save state
-        existing_titles = [f.title for f in folders]
+        existing_titles = [f.title for f in all_folders if f.title != "稍后再看"]
         state = StateData(
             scope_kind=scope_kind,
             scope_value=scope_value,
-            folders=folders,
+            folders=[f for f in all_folders if f.title != "稍后再看"],
             invalid_items=invalid_entries,
             duplicate_groups=duplicates,
             item_folder_map=item_folder_map,
