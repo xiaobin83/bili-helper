@@ -8,14 +8,12 @@ Usage:
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 
-from bili_core.auth import Credentials
-from bili_core.http_client import BiliHTTPClient
+from bili_core.auth import Credentials, get_credentials
+from bili_core.http_client import BiliHTTPClient, DEFAULT_HEADERS
 from bili_core.signing import sign_params
 
 from video_analyzer.models import (
@@ -27,18 +25,6 @@ from video_analyzer.models import (
     VideoAnalysisResult,
     VideoDetail,
 )
-
-BILI_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
-    "Referer": "https://www.bilibili.com/",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Cache-Control": "no-cache",
-    "Connection": "keep-alive",
-}
 
 BASE_URL = "https://api.bilibili.com"
 
@@ -60,8 +46,13 @@ class VideoAPIClient:
             self._auth_client = http_client
             return
 
-        # Non-interactive credential check: file → env → public fallback
-        creds = self._load_credentials_silent()
+        # Full credential flow: .auth.json → env vars → QR login → public fallback
+        # (same auth flow as fav-organizer via bili_core.auth)
+        try:
+            creds = get_credentials()
+        except (SystemExit, RuntimeError):
+            creds = None
+
         if creds is not None:
             self._auth_client = BiliHTTPClient(
                 sessdata=creds.sessdata,
@@ -69,38 +60,9 @@ class VideoAPIClient:
                 buvid3=creds.buvid3,
             )
         else:
-            self._public_client = httpx.AsyncClient(timeout=30.0, headers=BILI_HEADERS, follow_redirects=True)
-
-    @staticmethod
-    def _load_credentials_silent() -> Optional[Credentials]:
-        """Try loading credentials from .auth.json or env vars without interactive QR."""
-        # Try .auth.json
-        auth_file = Path.cwd() / ".auth.json"
-        if auth_file.exists():
-            try:
-                import json
-                data = json.loads(auth_file.read_text(encoding="utf-8"))
-                return Credentials(
-                    sessdata=data["sessdata"],
-                    bili_jct=data["bili_jct"],
-                    buvid3=data.get("buvid3", ""),
-                    mid=data.get("mid", 0),
-                )
-            except Exception:
-                pass
-
-        # Try environment variables
-        sessdata = os.environ.get("BILI_SESSDATA") or os.environ.get("FAV_SESSDATA")
-        bili_jct = os.environ.get("BILI_BILI_JCT") or os.environ.get("FAV_BILI_JCT")
-        if sessdata and bili_jct:
-            buvid3 = os.environ.get("BILI_BUVID3") or os.environ.get("FAV_BUVID3", "")
-            return Credentials(
-                sessdata=sessdata,
-                bili_jct=bili_jct,
-                buvid3=buvid3,
+            self._public_client = httpx.AsyncClient(
+                timeout=30.0, headers=DEFAULT_HEADERS, follow_redirects=True
             )
-
-        return None
 
     async def _get(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
         """Issue a GET request via whichever client is available, return parsed JSON."""

@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import sys
 
+from bili_core.errors import AuthError, CSRFError, RateLimitError
+
 from video_analyzer.api_client import VideoAPIClient
 from video_analyzer.markdown_renderer import render_markdown
 
@@ -43,6 +45,18 @@ def main() -> None:
         client = VideoAPIClient()
         result = asyncio.run(client.analyze_video(args.bvid, skip_flags))
         markdown = render_markdown(result, skip_flags)
+    except AuthError:
+        print(
+            "登录已过期，请重新运行工具以扫码登录，或设置 BILI_SESSDATA 环境变量",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except CSRFError:
+        print("CSRF 校验失败，请重新运行工具以刷新凭证", file=sys.stderr)
+        sys.exit(1)
+    except RateLimitError as e:
+        print(f"请求频率受限，请稍后重试: {e}", file=sys.stderr)
+        sys.exit(1)
     except ValueError as e:
         print(f"错误: {e}", file=sys.stderr)
         sys.exit(1)
