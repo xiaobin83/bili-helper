@@ -50,3 +50,32 @@ bili-helper/
 ## 参考
 
 - [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) — 社区维护的 B站 API 文档
+
+---
+
+## Agent 安装指南
+
+> 以下内容供 AI Agent 阅读，用于自动化安装 bili-helper。
+
+### 前置条件
+
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) 包管理器
+
+### 安装步骤
+
+```bash
+cd fav-organizer && uv sync
+```
+
+### 验证安装
+
+```bash
+uv run fav-organizer --help
+```
+
+### 注册 Skill（OpenCode）
+
+将 `fav-organizer/SKILL.md` 注册为 OpenCode skill，触发词：整理收藏夹、B站收藏管理、收藏夹分类、清理失效收藏。
+
+
