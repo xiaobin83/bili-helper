@@ -2,6 +2,12 @@
 
 B站 up主助手 — 基于 OpenCode skills 的 B站 自动化工具集，帮助 up主 完成收藏管理、数据分析等日常工作。
 
+## 安装
+
+告诉你的 Agent：
+
+> 安装 https://github.com/xiaobin83/bili-helper 中包含的所有技能
+
 ## 工具
 
 | 工具 | 说明 |
