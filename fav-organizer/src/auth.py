@@ -10,7 +10,6 @@ import json
 import os
 import sys
 import time
-import webbrowser
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional
@@ -204,18 +203,9 @@ def _generate_qr(client: httpx.Client) -> tuple[str, str]:
 
 
 def _display_qr(url: str) -> None:
-    """Display QR code: try opening browser, always print ASCII fallback + URL."""
-    opened = False
-    try:
-        opened = webbrowser.open(url)
-    except Exception:
-        pass
-
+    """Display QR code: print URL and ASCII QR to terminal."""
     print(f"\n📋 二维码链接: {url}\n")
     _print_ascii_qr(url)
-
-    if opened:
-        print("🌐 已尝试打开浏览器（如无二维码请复制上方链接到隐私/无痕窗口打开）")
     print("👆 请使用B站APP扫描二维码登录\n")
 
 
