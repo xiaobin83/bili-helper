@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .http_client import BiliHTTPClient
+from bili_core.http_client import BiliHTTPClient
 from .models import Folder, FavoritedItem
 
 

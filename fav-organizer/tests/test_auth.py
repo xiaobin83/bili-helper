@@ -12,16 +12,11 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-# Add src to path for direct imports
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
-from auth import (  # noqa: E402
+from bili_core.auth import (  # noqa: E402
     Credentials,
     _load_from_file,
     _load_from_env,
@@ -140,7 +135,7 @@ class TestLoadFromFile:
     """Tests for _load_from_file()."""
 
     def test_file_not_found(self, tmp_path):
-        with patch("auth._AUTH_FILE", tmp_path / "nonexistent.json"):
+        with patch("bili_core.auth._AUTH_FILE", tmp_path / "nonexistent.json"):
             result = _load_from_file()
             assert result is None
 
@@ -148,7 +143,7 @@ class TestLoadFromFile:
         auth_file = tmp_path / ".auth.json"
         data = {"sessdata": "sess123", "bili_jct": "jct456", "buvid3": "buv789", "mid": 10}
         auth_file.write_text(json.dumps(data))
-        with patch("auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
             creds = _load_from_file()
             assert creds is not None
             assert creds.sessdata == "sess123"
@@ -160,7 +155,7 @@ class TestLoadFromFile:
         auth_file = tmp_path / ".auth.json"
         data = {"sessdata": "sess", "bili_jct": "jct"}
         auth_file.write_text(json.dumps(data))
-        with patch("auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
             creds = _load_from_file()
             assert creds is not None
             assert creds.buvid3 == ""
@@ -169,14 +164,14 @@ class TestLoadFromFile:
     def test_invalid_json(self, tmp_path):
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text("not valid json")
-        with patch("auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
             result = _load_from_file()
             assert result is None
 
     def test_missing_keys(self, tmp_path):
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text(json.dumps({"other": "value"}))
-        with patch("auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
             result = _load_from_file()
             assert result is None
 
@@ -234,8 +229,8 @@ class TestGetCredentialsPriority:
         """When .auth.json exists, it should be used even if env vars are set."""
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text(json.dumps({"sessdata": "file_sess", "bili_jct": "file_jct"}))
-        with patch("auth._AUTH_FILE", auth_file):
-            with patch("auth._load_from_env") as mock_env:
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
+            with patch("bili_core.auth._load_from_env") as mock_env:
                 mock_env.return_value = None
                 creds = get_credentials()
                 assert creds.sessdata == "file_sess"
@@ -243,8 +238,8 @@ class TestGetCredentialsPriority:
     def test_env_fallback(self, tmp_path):
         """When no file, env vars should be used."""
         no_file = tmp_path / ".auth.json"
-        with patch("auth._AUTH_FILE", no_file):
-            with patch("auth._load_from_env") as mock_env:
+        with patch("bili_core.auth._AUTH_FILE", no_file):
+            with patch("bili_core.auth._load_from_env") as mock_env:
                 mock_env.return_value = Credentials(sessdata="env_sess", bili_jct="env_jct")
                 creds = get_credentials()
                 assert creds.sessdata == "env_sess"
@@ -252,10 +247,10 @@ class TestGetCredentialsPriority:
     def test_triggers_login_flow(self, tmp_path):
         """When neither file nor env, login_flow() should be called."""
         no_file = tmp_path / ".auth.json"
-        with patch("auth._AUTH_FILE", no_file):
-            with patch("auth._load_from_env") as mock_env:
+        with patch("bili_core.auth._AUTH_FILE", no_file):
+            with patch("bili_core.auth._load_from_env") as mock_env:
                 mock_env.return_value = None
-                with patch("auth.login_flow") as mock_login:
+                with patch("bili_core.auth.login_flow") as mock_login:
                     mock_login.return_value = Credentials(sessdata="qr_sess", bili_jct="qr_jct")
                     creds = get_credentials()
                     mock_login.assert_called_once()
@@ -276,7 +271,7 @@ class TestCheckExpired:
         """code=0 means valid → return False."""
         creds = Credentials(sessdata="valid", bili_jct="jct")
         resp = _make_resp(self.NAV_VALID)
-        with patch("auth.httpx.Client") as mock_client_class:
+        with patch("bili_core.auth.httpx.Client") as mock_client_class:
             mock_client_class.return_value = _mock_client([resp])
             assert check_expired(creds) is False
 
@@ -284,22 +279,22 @@ class TestCheckExpired:
         """code=-101 means expired → return True."""
         creds = Credentials(sessdata="expired", bili_jct="jct")
         resp = _make_resp(self.NAV_EXPIRED)
-        with patch("auth.httpx.Client") as mock_client_class:
+        with patch("bili_core.auth.httpx.Client") as mock_client_class:
             mock_client_class.return_value = _mock_client([resp])
             assert check_expired(creds) is True
 
     def test_no_credentials_at_all(self, tmp_path):
         """When no creds available via file or env → return True."""
         no_file = tmp_path / ".auth.json"
-        with patch("auth._AUTH_FILE", no_file):
-            with patch("auth._load_from_env", return_value=None):
+        with patch("bili_core.auth._AUTH_FILE", no_file):
+            with patch("bili_core.auth._load_from_env", return_value=None):
                 assert check_expired(None) is True
 
     def test_network_error_treats_as_valid(self):
         """Network errors during check → return False (assume valid)."""
         import httpx
         creds = Credentials(sessdata="s", bili_jct="j")
-        with patch("auth._nav_api") as mock_nav:
+        with patch("bili_core.auth._nav_api") as mock_nav:
             mock_nav.side_effect = httpx.RequestError("network down")
             assert check_expired(creds) is False
 
@@ -308,8 +303,8 @@ class TestCheckExpired:
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text(json.dumps({"sessdata": "file_sess", "bili_jct": "file_jct"}))
         resp = _make_resp(self.NAV_VALID)
-        with patch("auth._AUTH_FILE", auth_file):
-            with patch("auth.httpx.Client") as mock_client_class:
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
+            with patch("bili_core.auth.httpx.Client") as mock_client_class:
                 mock_client_class.return_value = _mock_client([resp])
                 assert check_expired(None) is False
 
@@ -340,9 +335,9 @@ class TestLoginFlow:
         auth_file = tmp_path / ".auth.json"
 
         # Mock _display_qr to avoid terminal output and browser opening
-        with patch("auth._display_qr"), patch("auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file):
             # Mock httpx.Client
-            with patch("auth.httpx.Client") as mock_client_class:
+            with patch("bili_core.auth.httpx.Client") as mock_client_class:
                 # response 1: QR generate
                 gen_resp = _make_resp(self.QR_GENERATE_RESP)
                 # response 2: poll success (with cookies)
@@ -372,10 +367,10 @@ class TestLoginFlow:
         """Poll returns 86101 (not scanned), then 0 (success)."""
         auth_file = tmp_path / ".auth.json"
 
-        with patch("auth._display_qr"), patch("auth._AUTH_FILE", auth_file), \
-             patch("auth.time.sleep"):  # skip sleep
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file), \
+             patch("bili_core.auth.time.sleep"):  # skip sleep
 
-            with patch("auth.httpx.Client") as mock_client_class:
+            with patch("bili_core.auth.httpx.Client") as mock_client_class:
                 gen_resp = _make_resp(self.QR_GENERATE_RESP)
                 poll_not_scanned = self._make_poll_resp(_POLL_NOT_SCANNED)
                 poll_scanned = self._make_poll_resp(_POLL_SCANNED)
@@ -398,10 +393,10 @@ class TestLoginFlow:
         """Poll returns 86038 (expired) → sys.exit(1)."""
         auth_file = tmp_path / ".auth.json"
 
-        with patch("auth._display_qr"), patch("auth._AUTH_FILE", auth_file), \
-             patch("auth.time.sleep"):
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file), \
+             patch("bili_core.auth.time.sleep"):
 
-            with patch("auth.httpx.Client") as mock_client_class:
+            with patch("bili_core.auth.httpx.Client") as mock_client_class:
                 gen_resp = _make_resp(self.QR_GENERATE_RESP)
                 poll_expired = self._make_poll_resp(_POLL_EXPIRED)
 
@@ -413,8 +408,8 @@ class TestLoginFlow:
 
     def test_generate_fails(self):
         """QR generate endpoint returns error code."""
-        with patch("auth._display_qr"):
-            with patch("auth.httpx.Client") as mock_client_class:
+        with patch("bili_core.auth._display_qr"):
+            with patch("bili_core.auth.httpx.Client") as mock_client_class:
                 fail_resp = _make_resp({"code": -1, "message": "server error"})
                 mock_client_class.return_value = _mock_client([fail_resp])
 
@@ -425,11 +420,11 @@ class TestLoginFlow:
         """Poll times out after 3 minutes (simulated)."""
         auth_file = tmp_path / ".auth.json"
 
-        with patch("auth._display_qr"), patch("auth._AUTH_FILE", auth_file), \
-             patch("auth.time.sleep"):
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file), \
+             patch("bili_core.auth.time.sleep"):
             # Patch time.monotonic to simulate timeout
-            with patch("auth.time.monotonic", side_effect=[0, 999999]):
-                with patch("auth.httpx.Client") as mock_client_class:
+            with patch("bili_core.auth.time.monotonic", side_effect=[0, 999999]):
+                with patch("bili_core.auth.httpx.Client") as mock_client_class:
                     gen_resp = _make_resp(self.QR_GENERATE_RESP)
                     # After 999999 seconds, it's beyond the 180s deadline
                     mock_client_class.return_value = _mock_client([gen_resp])
@@ -443,7 +438,7 @@ class TestLoginFlow:
         auth_file = tmp_path / ".auth.json"
         creds = Credentials(sessdata="sess", bili_jct="jct", buvid3="buv", mid=5)
 
-        with patch("auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
             _save_credentials(creds)
 
         saved = json.loads(auth_file.read_text())
@@ -473,7 +468,7 @@ class TestExtractCredentials:
     def test_nav_api_failure_graceful(self):
         """If nav API fails, mid should be 0 but credentials still returned."""
         resp = _make_resp({}, cookies={"SESSDATA": "s", "bili_jct": "j"})
-        with patch("auth.httpx.Client") as mock_client_class:
+        with patch("bili_core.auth.httpx.Client") as mock_client_class:
             # Nav API call fails
             fail_nav = _make_resp({"code": -500}, status_code=500)
             mock_client_class.return_value = _mock_client([fail_nav])
@@ -485,7 +480,7 @@ class TestExtractCredentials:
     def test_nav_api_network_error_graceful(self):
         """If nav API raises, credentials still returned with mid=0."""
         resp = _make_resp({}, cookies={"SESSDATA": "s", "bili_jct": "j"})
-        with patch("auth.httpx.Client") as mock_client_class:
+        with patch("bili_core.auth.httpx.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_client.__enter__.return_value = mock_client
             mock_client.__exit__.return_value = False
@@ -510,7 +505,7 @@ class TestIntegration:
         monkeypatch.setenv("FAV_SESSDATA", "env_sess")
         monkeypatch.setenv("FAV_BILI_JCT", "env_jct")
 
-        with patch("auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE", auth_file):
             creds = get_credentials()
             assert creds.sessdata == "file"
             assert creds.mid == 1
@@ -523,7 +518,7 @@ class TestIntegration:
         monkeypatch.setenv("FAV_BUVID3", "env_buv")
         monkeypatch.setenv("FAV_MID", "42")
 
-        with patch("auth._AUTH_FILE", no_file):
+        with patch("bili_core.auth._AUTH_FILE", no_file):
             creds = get_credentials()
             assert creds.sessdata == "env_sess"
             assert creds.bili_jct == "env_jct"

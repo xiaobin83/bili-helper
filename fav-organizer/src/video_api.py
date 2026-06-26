@@ -7,7 +7,7 @@ via ``StateManager.clear_video_cache()``.
 
 from __future__ import annotations
 
-from .http_client import BiliHTTPClient
+from bili_core.http_client import BiliHTTPClient
 from .state_manager import StateManager
 
 BASE_URL = "https://api.bilibili.com/x/web-interface/view"

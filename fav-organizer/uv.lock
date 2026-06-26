@@ -83,6 +83,34 @@ wheels = [
 ]
 
 [[package]]
+name = "bili-core"
+version = "0.1.0"
+source = { editable = "../bili-core" }
+dependencies = [
+    { name = "curl-cffi" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "qrcode" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "curl-cffi", specifier = ">=0.15.0" },
+    { name = "httpx", specifier = ">=0.25.0" },
+    { name = "pydantic", specifier = ">=2.7.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "qrcode", specifier = ">=7.4.0" },
+]
+provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=7.0.0" },
+    { name = "pytest-asyncio", specifier = ">=0.23.0" },
+]
+
+[[package]]
 name = "cachetools"
 version = "7.1.4"
 source = { registry = "https://pypi.org/simple" }
@@ -478,6 +506,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "asyncio" },
+    { name = "bili-core" },
     { name = "curl-cffi" },
     { name = "fastmcp" },
     { name = "httpx" },
@@ -502,6 +531,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "asyncio", specifier = ">=3.4.3" },
+    { name = "bili-core", editable = "../bili-core" },
     { name = "curl-cffi", specifier = ">=0.15.0" },
     { name = "fastmcp", specifier = ">=3.0.0" },
     { name = "httpx", specifier = ">=0.25.0" },

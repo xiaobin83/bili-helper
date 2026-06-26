@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import httpx
 import pytest
 
-from src.errors import AuthError, CSRFError, RateLimitError
-from src.http_client import MAX_RETRIES, MIN_INTERVAL, RETRY_WAIT, BiliHTTPClient
+from bili_core.errors import AuthError, CSRFError, RateLimitError
+from bili_core.http_client import MAX_RETRIES, MIN_INTERVAL, RETRY_WAIT, BiliHTTPClient
 
 
 # ---------------------------------------------------------------------------
@@ -235,10 +235,10 @@ async def test_request_interval_sleeps_when_too_fast() -> None:
     with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
         await client.get("https://api.bilibili.com/x/test")
 
-    # asyncio.sleep should have been called with ≈MIN_INTERVAL
+    # asyncio.sleep should have been called with ≈MIN_INTERVAL + jitter (0-1s)
     sleep_calls = mock_sleep.await_args_list
-    interval_sleeps = [c for c in sleep_calls if abs(c.args[0] - MIN_INTERVAL) < 0.1]
-    assert len(interval_sleeps) >= 1, f"Expected a sleep of {MIN_INTERVAL}s, got {sleep_calls}"
+    interval_sleeps = [c for c in sleep_calls if MIN_INTERVAL <= c.args[0] <= MIN_INTERVAL + 1.0]
+    assert len(interval_sleeps) >= 1, f"Expected a sleep ≈{MIN_INTERVAL}s, got {sleep_calls}"
 
 
 @pytest.mark.asyncio

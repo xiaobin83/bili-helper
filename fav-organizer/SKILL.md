@@ -116,11 +116,23 @@ uv run fav-organizer delete-empty
 
 凭证优先级：`.auth.json`（二维码登录）> 环境变量 > 自动触发登录。
 
+推荐使用统一的环境变量前缀（与项目其他工具共享）：
+
 ```bash
-export FAV_SESSDATA="..."
-export FAV_BILI_JCT="..."
-export FAV_BUVID3="..."  # 可选
+export BILI_SESSDATA="..."
+export BILI_BILI_JCT="..."
+export BILI_BUVID3="..."  # 可选
 ```
+
+旧前缀 `FAV_*` 仍然兼容但已弃用：
+
+```bash
+export FAV_SESSDATA="..."       # 仍可用（弃用）
+export FAV_BILI_JCT="..."       # 仍可用（弃用）
+export FAV_BUVID3="..."         # 仍可用（弃用）
+```
+
+两种前缀可混用，读取优先级：`BILI_*` > `FAV_*`。
 
 获取方式：浏览器 DevTools (F12) → Application → Cookies → `.bilibili.com`
 

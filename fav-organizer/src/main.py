@@ -24,12 +24,13 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from src.auth import check_expired, get_credentials
+from bili_core.auth import check_expired, get_credentials
+from bili_core.http_client import BiliHTTPClient
+from bili_core.signing import sign_params
 from src.classifier_llm import classify_items
 from src.confirm import confirm_execution
 from src.dedup import detect_duplicates
 from src.fav_api import FavAPI
-from src.http_client import BiliHTTPClient
 from src.models import (
     BatchMeta,
     ClassificationEntry,
@@ -48,10 +49,11 @@ from src.models import (
 )
 from src.planner import build_plan
 from src.scanner import scan_invalid
-from src.signing import sign_params
 from src.state_manager import StateManager
 from src.video_api import VideoInfoAPI
 
+# Path to the credential file (same location as before)
+_AUTH_FILE = Path(__file__).resolve().parent.parent / ".auth.json"
 
 # ======================================================================
 # Preview / Markdown generation (used by "plan" command)
@@ -301,7 +303,7 @@ async def cmd_classify(
         return _cmd_classify_continue(mgr)
 
     # Auth
-    creds = get_credentials()
+    creds = get_credentials(env_prefix="FAV_", auth_file=_AUTH_FILE)
     if check_expired(creds):
         print("❌ 登录已过期，请重新获取 SESSDATA")
         return 1
@@ -717,7 +719,7 @@ async def cmd_execute(*, plan_path: str | None = None) -> int:
         return 0
 
     # Auth
-    creds = get_credentials()
+    creds = get_credentials(env_prefix="FAV_", auth_file=_AUTH_FILE)
     if check_expired(creds):
         print("❌ 登录已过期，请重新获取 SESSDATA")
         return 1
@@ -747,7 +749,7 @@ async def cmd_delete_empty() -> int:
 
     Skips the default folder (B站 does not allow deleting it).
     """
-    creds = get_credentials()
+    creds = get_credentials(env_prefix="FAV_", auth_file=_AUTH_FILE)
     if check_expired(creds):
         print("❌ 登录已过期，请重新获取 SESSDATA")
         return 1

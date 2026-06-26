@@ -14,6 +14,7 @@ license = "MIT"
 keywords = ["bilibili", "favorites", "organizer", "bili", "收藏夹"]
 
 dependencies = [
+    "bili-core",
     "httpx>=0.25.0",
     "pydantic>=2.7.0",
     "fastmcp>=3.0.0",
@@ -21,6 +22,9 @@ dependencies = [
     "asyncio>=3.4.3",
     "curl-cffi>=0.15.0",
 ]
+
+[tool.uv.sources]
+bili-core = { path = "../bili-core", editable = true }
 
 [project.optional-dependencies]
 dev = [

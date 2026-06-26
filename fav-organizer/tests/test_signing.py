@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.signing import (
+from bili_core.signing import (
     _cache,
     _compute_mixin_key,
     _encode_value,
@@ -132,7 +132,7 @@ class TestSignParams:
 
     # -- basic structure ---------------------------------------------------
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_adds_w_rid_and_wts(self, mock_get: MagicMock) -> None:
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
 
@@ -141,7 +141,7 @@ class TestSignParams:
         assert "w_rid" in result
         assert "wts" in result
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_w_rid_is_32_chars(self, mock_get: MagicMock) -> None:
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
 
@@ -149,7 +149,7 @@ class TestSignParams:
         assert len(result["w_rid"]) == 32
         assert isinstance(result["w_rid"], str)
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_w_rid_is_lowercase_hex(self, mock_get: MagicMock) -> None:
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
 
@@ -158,7 +158,7 @@ class TestSignParams:
         for ch in result["w_rid"]:
             assert ch in "0123456789abcdef"
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_wts_is_int(self, mock_get: MagicMock) -> None:
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
 
@@ -167,7 +167,7 @@ class TestSignParams:
 
     # -- preserves input ---------------------------------------------------
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_preserves_original_params(self, mock_get: MagicMock) -> None:
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
 
@@ -175,7 +175,7 @@ class TestSignParams:
         assert result["key1"] == "val1"
         assert result["key2"] == "val2"
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_does_not_mutate_input(self, mock_get: MagicMock) -> None:
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
 
@@ -185,7 +185,7 @@ class TestSignParams:
 
     # -- wts freshness -----------------------------------------------------
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_wts_is_recent_timestamp(self, mock_get: MagicMock) -> None:
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
 
@@ -197,7 +197,7 @@ class TestSignParams:
 
     # -- caching behavior --------------------------------------------------
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_cache_prevents_redundant_fetch(self, mock_get: MagicMock) -> None:
         """First call fetches keys; second call reuses cache."""
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
@@ -209,7 +209,7 @@ class TestSignParams:
         # Cache hit -- no additional HTTP call
         assert mock_get.call_count == 1
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_cache_cleared_by_clear_cache(self, mock_get: MagicMock) -> None:
         """After ``clear_cache()`` the next call should re-fetch keys."""
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
@@ -223,7 +223,7 @@ class TestSignParams:
 
     # -- encoding in the signing pipeline ----------------------------------
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_chinese_chars_uppercase_hex_in_signing(
         self, mock_get: MagicMock
     ) -> None:
@@ -234,7 +234,7 @@ class TestSignParams:
         assert len(result["w_rid"]) == 32
         assert all(c in "0123456789abcdef" for c in result["w_rid"])
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_special_chars_filtered_in_signing(
         self, mock_get: MagicMock
     ) -> None:
@@ -245,7 +245,7 @@ class TestSignParams:
         assert len(result["w_rid"]) == 32
         assert all(c in "0123456789abcdef" for c in result["w_rid"])
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_multiple_special_chars(self, mock_get: MagicMock) -> None:
         """Values with multiple ``!'()*`` chars produce a valid signature."""
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)
@@ -256,7 +256,7 @@ class TestSignParams:
 
     # -- cross-parameter sorting -------------------------------------------
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_sort_order_affects_signature(self, mock_get: MagicMock) -> None:
         """Different key ordering should produce different w_rid values
         (even when the set of params is the same)."""
@@ -269,7 +269,7 @@ class TestSignParams:
 
     # -- deterministic within same timestamp window ------------------------
 
-    @patch("src.signing.httpx.get")
+    @patch("bili_core.signing.httpx.get")
     def test_deterministic_with_same_input(self, mock_get: MagicMock) -> None:
         """Identical inputs should produce identical w_rid for the same key."""
         mock_get.return_value = MagicMock(json=lambda: MOCK_NAV_OK)

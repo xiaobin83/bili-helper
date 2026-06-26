@@ -16,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from src.auth import Credentials as AuthCredentialsDC
+from bili_core.auth import Credentials as AuthCredentialsDC
 from src.main import cmd_classify, cmd_plan, cmd_execute, generate_preview
 from src.models import (
     ClassificationEntry,

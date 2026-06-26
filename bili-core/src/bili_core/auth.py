@@ -35,6 +35,8 @@ _POLL_SCANNED = 86090
 _POLL_EXPIRED = 86038
 _POLL_SUCCESS = 0
 
+_AUTH_FILE: Path = Path.cwd() / ".auth.json"
+
 
 # ---------------------------------------------------------------------------
 # Credentials
@@ -84,8 +86,10 @@ def _mask(value: str, visible: int = 4) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _load_from_file(auth_file: Path) -> Optional[Credentials]:
+def _load_from_file(auth_file: Optional[Path] = None) -> Optional[Credentials]:
     """Try loading credentials from .auth.json."""
+    if auth_file is None:
+        auth_file = _AUTH_FILE
     if not auth_file.exists():
         return None
     try:
@@ -100,7 +104,7 @@ def _load_from_file(auth_file: Path) -> Optional[Credentials]:
         return None
 
 
-def _load_from_env(env_prefix: str) -> Optional[Credentials]:
+def _load_from_env(env_prefix: str = "BILI_") -> Optional[Credentials]:
     """Try loading credentials from environment variables with given prefix.
 
     When env_prefix is ``"BILI_"``, also checks the deprecated ``FAV_*``
@@ -154,7 +158,7 @@ def get_credentials(
         3. Interactive QR code login flow
     """
     if auth_file is None:
-        auth_file = Path.cwd() / ".auth.json"
+        auth_file = _AUTH_FILE
 
     # Priority 1: file
     creds = _load_from_file(auth_file)
@@ -199,8 +203,7 @@ def check_expired(
     If no creds provided, attempts to load from file or env.
     """
     if creds is None:
-        auth_file = Path.cwd() / ".auth.json"
-        creds = _load_from_file(auth_file)
+        creds = _load_from_file(_AUTH_FILE)
         if creds is None:
             creds = _load_from_env(env_prefix)
         if creds is None:
@@ -340,8 +343,10 @@ def _extract_credentials(resp: httpx.Response) -> Credentials:
     return creds
 
 
-def _save_credentials(creds: Credentials, auth_file: Path) -> None:
+def _save_credentials(creds: Credentials, auth_file: Optional[Path] = None) -> None:
     """Save credentials to auth file."""
+    if auth_file is None:
+        auth_file = _AUTH_FILE
     data = asdict(creds)
     auth_file.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -350,7 +355,7 @@ def _save_credentials(creds: Credentials, auth_file: Path) -> None:
     print(f"🔐 凭据已保存到 {auth_file}")
 
 
-def login_flow(*, auth_file: Path) -> Credentials:
+def login_flow(*, auth_file: Optional[Path] = None) -> Credentials:
     """Run the complete QR code login flow and return credentials.
 
     Steps:
