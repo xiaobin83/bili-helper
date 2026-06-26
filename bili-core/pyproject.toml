@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bili-core"
+version = "0.1.0"
+description = "Shared B站 utility library — auth, HTTP client, signing, errors"
+authors = [
+    {name = "Bili-Helper"},
+]
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["bilibili", "bili", "core", "utility"]
+
+dependencies = [
+    "httpx>=0.25.0",
+    "curl-cffi>=0.15.0",
+    "qrcode>=7.4.0",
+    "pydantic>=2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bili_core"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
