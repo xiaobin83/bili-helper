@@ -31,7 +31,8 @@ _NAV_URL = "https://api.bilibili.com/x/web-interface/nav"
 
 # Polling constants
 _POLL_INTERVAL = 2  # seconds
-_QR_EXPIRE_SECONDS = 180
+_QR_EXPIRE_SECONDS = 60
+_MAX_NO_SCAN_POLLS = 5   # exit early after this many NOT_SCANNED polls
 
 # Poll response codes (from data.code)
 _POLL_NOT_SCANNED = 86101
@@ -146,7 +147,7 @@ def _nav_api(creds: Credentials) -> httpx.Response:
     with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
         return client.get(
             _NAV_URL,
-            headers={"Cookie": creds.cookie_str},
+            headers={**{"Cookie": creds.cookie_str}, **_AUTH_HEADERS},
         )
 
 
@@ -181,9 +182,20 @@ def check_expired(creds: Optional[Credentials] = None) -> bool:
 # QR login flow
 # ---------------------------------------------------------------------------
 
+_AUTH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Referer": "https://www.bilibili.com/",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+
+
 def _generate_qr(client: httpx.Client) -> tuple[str, str]:
     """Generate a QR code for login. Returns (qrcode_key, url)."""
-    resp = client.get(_GENERATE_URL)
+    resp = client.get(_GENERATE_URL, headers=_AUTH_HEADERS)
     resp.raise_for_status()
     data = resp.json()
     if data.get("code") != 0:
@@ -192,17 +204,19 @@ def _generate_qr(client: httpx.Client) -> tuple[str, str]:
 
 
 def _display_qr(url: str) -> None:
-    """Display QR code: try opening browser, fall back to terminal ASCII."""
+    """Display QR code: try opening browser, always print ASCII fallback + URL."""
     opened = False
     try:
         opened = webbrowser.open(url)
     except Exception:
         pass
 
-    if not opened:
-        _print_ascii_qr(url)
+    print(f"\n📋 二维码链接: {url}\n")
+    _print_ascii_qr(url)
 
-    print("👆 请使用B站APP扫描二维码登录（浏览器已自动打开，若未打开请查看终端二维码）")
+    if opened:
+        print("🌐 已尝试打开浏览器（如无二维码请复制上方链接到隐私/无痕窗口打开）")
+    print("👆 请使用B站APP扫描二维码登录\n")
 
 
 def _print_ascii_qr(url: str) -> None:
@@ -218,9 +232,10 @@ def _poll_login(client: httpx.Client, qrcode_key: str) -> Credentials:
     """Poll the login status until success or expiry. Returns credentials on success."""
     deadline = time.monotonic() + _QR_EXPIRE_SECONDS
     prev_status: Optional[int] = None
+    no_scan_count = 0
 
     while time.monotonic() < deadline:
-        resp = client.get(_POLL_URL, params={"qrcode_key": qrcode_key})
+        resp = client.get(_POLL_URL, params={"qrcode_key": qrcode_key}, headers=_AUTH_HEADERS)
         resp.raise_for_status()
         body = resp.json()
         data = body.get("data", {})
@@ -238,11 +253,23 @@ def _poll_login(client: httpx.Client, qrcode_key: str) -> Credentials:
                 sys.exit(1)
             elif status == _POLL_SUCCESS:
                 print("✅ 登录成功！")
-                # Extract cookies from Set-Cookie headers
                 return _extract_credentials(resp)
             else:
                 msg = data.get("message", f"未知状态码: {status}")
                 print(f"⚠️  {msg}")
+
+        # Early exit: too many consecutive NOT_SCANNED polls
+        if status == _POLL_NOT_SCANNED:
+            no_scan_count += 1
+            if no_scan_count >= _MAX_NO_SCAN_POLLS:
+                remaining = int(deadline - time.monotonic())
+                print(f"⏰ 已等待 {_MAX_NO_SCAN_POLLS * _POLL_INTERVAL}s 仍未扫码，"
+                      f"二维码还剩 {max(0, remaining)}s 有效")
+                print("💡 提示：浏览器可能已有登录态导致未显示二维码，"
+                      "请复制上方链接到隐私/无痕窗口打开，或直接在终端扫描 ASCII 二维码")
+                no_scan_count = 0  # reset to keep polling
+        else:
+            no_scan_count = 0
 
         if status == _POLL_SUCCESS:
             return _extract_credentials(resp)
@@ -266,7 +293,8 @@ def _extract_credentials(resp: httpx.Response) -> Credentials:
     mid = 0
     try:
         with httpx.Client(timeout=httpx.Timeout(15.0)) as client:
-            nav_resp = client.get(_NAV_URL, headers={"Cookie": creds.cookie_str})
+            nav_headers = {**{"Cookie": creds.cookie_str}, **_AUTH_HEADERS}
+            nav_resp = client.get(_NAV_URL, headers=nav_headers)
             nav_data = nav_resp.json()
             if nav_data.get("code") == 0:
                 mid = nav_data["data"].get("mid", 0)
