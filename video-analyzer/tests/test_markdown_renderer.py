@@ -62,8 +62,8 @@ def _full_result() -> VideoAnalysisResult:
                 ctime=1000000000,
             ),
         ],
-        pbp=PBP(step_sec=[0, 5, 10, 15, 20], duration=5),
-        ai_summary=AISummary(summary="Summary text", outline=["Point 1", "Point 2"]),
+        pbp=PBP(step_sec=[0, 5, 10, 15, 20], interval=5),
+        ai_summary=AISummary(summary="Summary text", outline=[{"title": "Point 1"}, {"title": "Point 2"}]),
         play_url=PlayUrl(
             url="https://example.com/play",
             quality=80,
@@ -102,7 +102,7 @@ def _minimal_result(
             Comment(rpid=1, mid="1", uname="U", message="comment"),
         ]
     if include_pbp:
-        result.pbp = PBP(step_sec=[1], duration=1)
+        result.pbp = PBP(step_sec=[1], interval=1)
     if include_summary:
         result.ai_summary = AISummary(summary="summary")
     if include_playurl:

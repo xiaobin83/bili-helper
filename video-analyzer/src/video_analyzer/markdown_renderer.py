@@ -13,6 +13,8 @@ import time
 from video_analyzer.models import (
     AISummary,
     Comment,
+    OutlineItem,
+    OutlinePart,
     PBP,
     PlayUrl,
     Screenshot,
@@ -123,18 +125,23 @@ def _render_pbp(result: VideoAnalysisResult) -> list[str]:
         lines.append("该视频暂无高能进度条数据\n")
         return lines
 
-    # Show peak density areas (top 5 seconds by danmaku count)
+    # Show peak density areas (top 5 segments by vertex value)
     indexed = [(i, v) for i, v in enumerate(pbp.step_sec) if v > 0]
     indexed.sort(key=lambda x: x[1], reverse=True)
     peaks = indexed[:5]
 
-    total_danmaku = sum(pbp.step_sec)
-    lines.append(f"总弹幕密度采样点: {len(pbp.step_sec)} 总弹幕数: {total_danmaku}\n")
+    interval = pbp.interval or 1
+    lines.append(
+        f"总采样点数: {len(pbp.step_sec)} "
+        f"采样间隔: {interval}s "
+        f"最大值: {max(pbp.step_sec):.0f}\n"
+    )
     lines.append("**高能时刻 TOP 5:**\n")
     for idx, count in peaks:
-        t_str = _format_duration(idx)
-        bar = "█" * min(count // 10 + 1, 40)
-        lines.append(f"- `{t_str}` {bar} ({count} 条)")
+        t_str = _format_duration(idx * interval)
+        bar_count = max(1, min(int(count) // 10 + 1, 40))
+        bar = "█" * bar_count
+        lines.append(f"- `{t_str}` {bar} ({count:.0f})")
     lines.append("")
     return lines
 
@@ -154,9 +161,14 @@ def _render_ai_summary(result: VideoAnalysisResult) -> list[str]:
 
     if ai.outline:
         lines.append("**大纲:**\n")
-        for point in ai.outline:
-            lines.append(f"- {_truncate(point)}")
+        for item in ai.outline:
+            lines.append(f"- **{item.title}**")
+            for part in item.part_outline:
+                lines.append(f"  - {_truncate(part.content)}")
         lines.append("")
+
+    if not ai.summary and not ai.outline:
+        lines.append("该视频暂无AI总结数据\n")
 
     return lines
 
