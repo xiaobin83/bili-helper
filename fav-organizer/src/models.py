@@ -238,8 +238,9 @@ class PlanResourceRef(BaseModel):
 
 
 class PlanMoveEntry(BaseModel):
-    """A move operation in serialized form."""
+    """A move or copy operation in serialized form."""
 
+    action: Literal["move", "copy"] = "move"
     source_folder_id: int
     source_folder_title: str
     target_title: str

@@ -378,7 +378,7 @@ class TestPreviewOutput:
         assert "# 🗂️ 收藏夹整理计划" in preview
         assert "📁 新文件夹" in preview
         assert "🗑️ 失效/重复内容" in preview
-        assert "↗️ 分类移动计划" in preview
+        assert "↗️ 分类整理计划" in preview
         assert "fav-organizer execute" in preview
 
     def test_empty_preview(self):

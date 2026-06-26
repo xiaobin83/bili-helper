@@ -64,8 +64,14 @@ def _summary_bar(plan: OrganizePlan) -> str:
     if plan.folders_to_create:
         parts.append(f"📁 新建 {len(plan.folders_to_create)} 个文件夹")
     if plan.moves:
-        total_moved = sum(len(op.resources) for op in plan.moves)
-        parts.append(f"↗️  移动 {total_moved} 个内容")
+        moves = [op for op in plan.moves if op.action == "move"]
+        copies = [op for op in plan.moves if op.action == "copy"]
+        total_moved = sum(len(op.resources) for op in moves)
+        total_copied = sum(len(op.resources) for op in copies)
+        if total_moved:
+            parts.append(f"↗️  移动 {total_moved} 个内容")
+        if total_copied:
+            parts.append(f"📋 复制 {total_copied} 个内容")
     if plan.deletions:
         total_del = sum(len(op.resources) for op in plan.deletions)
         parts.append(f"🗑️  删除 {total_del} 个内容")
@@ -94,11 +100,11 @@ def _invalid_table(plan: OrganizePlan) -> str:
 
 
 def _move_table(plan: OrganizePlan) -> str:
-    """Return a Markdown section of classification moves grouped by target."""
+    """Return a Markdown section of classification moves/copies grouped by target."""
     if not plan.moves:
         return ""
     lines = [
-        "### ↗️ 分类移动计划",
+        "### ↗️ 分类整理计划",
         "",
     ]
     groups: dict[str, list[Operation]] = defaultdict(list)
@@ -110,7 +116,9 @@ def _move_table(plan: OrganizePlan) -> str:
         ops = groups[target]
         total = sum(len(op.resources) for op in ops)
         sources = ", ".join(sorted({op.source.title for op in ops if op.source}))
-        lines.append(f"**→ {target}** ({total} 个，来源: {sources})")
+        action_label = "移动" if any(op.action == "move" for op in ops) else "复制"
+        action_icon = "↗️" if action_label == "移动" else "📋"
+        lines.append(f"**{action_icon} → {target}** ({action_label} {total} 个，来源: {sources})")
         lines.append("")
         for op in ops:
             for res in op.resources:
@@ -617,6 +625,7 @@ def _plan_to_file(plan: OrganizePlan) -> PlanFile:
     """Convert an in-memory OrganizePlan to a serializable PlanFile."""
     moves = [
         PlanMoveEntry(
+            action=op.action if op.action in ("move", "copy") else "move",
             source_folder_id=op.source.id if op.source else 0,
             source_folder_title=op.source.title if op.source else "",
             target_title=str(op.target) if op.target else "",
@@ -820,8 +829,11 @@ async def _execute_plan_file(
         except Exception as exc:
             print(f"⚠️  创建文件夹 '{title}' 失败: {exc}")
 
-    # ── Phase 2: Move items ─────────────────────────────────────────
-    for m in plan_file.moves:
+    # ── Phase 2: Move / Copy items ───────────────────────────────────
+    move_entries = [m for m in plan_file.moves if m.action == "move"]
+    copy_entries = [m for m in plan_file.moves if m.action == "copy"]
+
+    for m in move_entries:
         if not m.resources:
             continue
 
@@ -847,6 +859,33 @@ async def _execute_plan_file(
                 )
             except Exception as exc:
                 print(f"⚠️  移动失败: {exc}")
+
+    for c in copy_entries:
+        if not c.resources:
+            continue
+
+        tar_id = title_to_id.get(c.target_title, 0)
+        if tar_id == 0:
+            print(f"⚠️  目标文件夹 '{c.target_title}' 不存在，跳过复制")
+            continue
+
+        resources = [f"{r.id}:{r.type}" for r in c.resources]
+        batches = [resources[i:i + BATCH] for i in range(0, len(resources), BATCH)]
+
+        for batch_idx, batch in enumerate(batches):
+            step += 1
+            suffix = f" (批次 {batch_idx + 1}/{len(batches)})" if len(batches) > 1 else ""
+            desc = f"复制 {len(batch)} 个资源到 '{c.target_title}'{suffix}"
+            print(f"📋 [{step}/{total_steps}] {desc}")
+            try:
+                await fav_api.copy_items(
+                    src_media_id=c.source_folder_id,
+                    tar_media_id=tar_id,
+                    resources=batch,
+                    mid=mid,
+                )
+            except Exception as exc:
+                print(f"⚠️  复制失败: {exc}")
 
     # ── Phase 3: Delete items ───────────────────────────────────────
     for d in plan_file.deletions:

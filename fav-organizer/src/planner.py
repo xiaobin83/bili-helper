@@ -91,22 +91,26 @@ def build_plan(
         )
 
     # ------------------------------------------------------------------
-    # Step 4 — Generate move operations (only from non-default folders)
+    # Step 4 — Generate move (default folder) / copy (other folders) operations
     # ------------------------------------------------------------------
-    # Group moves by (source_folder_id, target_title) for batching
+    # Default folders: move items out to target categories.
+    # Non-default folders: copy items to target categories (don't remove from source).
     move_groups: dict[tuple[int, str], list[FavoritedItem]] = defaultdict(list)
+    copy_groups: dict[tuple[int, str], list[FavoritedItem]] = defaultdict(list)
 
     for item_id, result in merged.items():
         source_folder = item_folder_map.get(item_id)
         if source_folder is None:
-            continue  # no source folder info → cannot move
+            continue
 
-        # Skip items already in the target folder
         if source_folder.title == result.target_folder_title:
             continue
 
         key = (source_folder.id, result.target_folder_title)
-        move_groups[key].append(result.item)
+        if source_folder.is_default:
+            move_groups[key].append(result.item)
+        else:
+            copy_groups[key].append(result.item)
 
     move_ops: list[Operation] = []
     for (src_id, target_title), items in move_groups.items():
@@ -120,6 +124,23 @@ def build_plan(
         move_ops.append(
             Operation(
                 action="move",
+                source=source_folder,
+                target=target_title,
+                resources=items,
+            )
+        )
+
+    for (src_id, target_title), items in copy_groups.items():
+        source_folder = item_folder_map.get(items[0].id)
+        if source_folder is None:
+            source_folder = next(
+                (f for f in existing_folders if f.id == src_id), None
+            )
+        if source_folder is None:
+            continue
+        move_ops.append(
+            Operation(
+                action="copy",
                 source=source_folder,
                 target=target_title,
                 resources=items,

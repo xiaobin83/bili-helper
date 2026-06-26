@@ -122,8 +122,8 @@ def test_no_create_when_target_exists():
     assert len(plan.folders_to_create) == 0
 
 
-def test_moves_item_from_non_default_to_target():
-    """Item in non-default folder classified to a different folder → move op."""
+def test_copies_item_from_non_default_to_target():
+    """Item in non-default folder classified to a different folder → copy op."""
     item = _make_item(1)
     source = _make_folder(2, title="旧文件夹", attr=1)
     classifications = [_make_classification(item, category="科技")]
@@ -137,7 +137,7 @@ def test_moves_item_from_non_default_to_target():
     )
 
     assert len(plan.moves) == 1
-    assert plan.moves[0].action == "move"
+    assert plan.moves[0].action == "copy"
     assert plan.moves[0].source == source
     assert plan.moves[0].target == "科技"
     assert len(plan.moves[0].resources) == 1
