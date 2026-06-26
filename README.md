@@ -34,7 +34,7 @@ cd dyn-publisher
 uv sync
 
 # 发布纯文本动态
-BILI_SESSDATA="..." BILI_BILI_JCT="..." uv run dyn-publisher publish --text "你好，世界！"
+uv run dyn-publisher publish --text "你好，世界！"
 
 # 发布图文动态
 uv run dyn-publisher publish --text "看图片" --image ./photo.png
@@ -54,6 +54,8 @@ export BILI_BUVID3="..."
 ```
 
 凭证获取：浏览器 DevTools (F12) → Application → Cookies → `.bilibili.com`
+
+> **无凭证时自动回退二维码登录**：如果既没有 `.auth.json` 也没有设置环境变量，工具会自动在终端输出 ASCII 二维码。在 OpenCode 等可显示 console log 的工具中，可直接扫描终端中的二维码完成登录，登录后凭证自动保存到 `.auth.json`。
 
 ## 项目结构
 
