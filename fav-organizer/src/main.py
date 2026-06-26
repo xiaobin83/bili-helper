@@ -53,7 +53,7 @@ from src.state_manager import StateManager
 from src.video_api import VideoInfoAPI
 
 # Path to the credential file (same location as before)
-_AUTH_FILE = Path(__file__).resolve().parent.parent / ".auth.json"
+_AUTH_FILE = Path(__file__).resolve().parent.parent.parent / ".auth.json"
 
 # ======================================================================
 # Preview / Markdown generation (used by "plan" command)
