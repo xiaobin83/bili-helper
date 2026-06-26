@@ -79,7 +79,7 @@ bili-helper/
 
 ## 参考
 
-- [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) — 社区维护的 B站 API 文档
+- [bili-apis](https://github.com/xiaobin83/bili-apis-private.git) — B站 API 文档 (私有 fork，基于社区维护的 bilibili-API-collect)
 
 ---
 
