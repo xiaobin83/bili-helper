@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from bili_core.auth import get_credentials
+from bili_core.auth import DEFAULT_AUTH_FILE, get_credentials
 
 from dyn_publisher.api import DynPublisherAPI
 from dyn_publisher.template import TemplateError, load_template, validate_template
@@ -91,7 +91,7 @@ def main() -> None:
     try:
         creds = get_credentials(
             env_prefix=args.env_prefix,
-            auth_file=Path(args.auth_file) if args.auth_file else None,
+            auth_file=Path(args.auth_file) if args.auth_file else DEFAULT_AUTH_FILE,
         )
     except Exception as e:
         print(f"Auth error: {e}", file=sys.stderr)
