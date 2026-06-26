@@ -14,6 +14,7 @@ B站 up主助手 — 基于 OpenCode skills 的 B站 自动化工具集，帮助
 |------|------|
 | [fav-organizer](./fav-organizer/) | 收藏夹自动整理，一键分类/去重/清理失效内容 |
 | [dyn-publisher](./dyn-publisher/) | 动态发布，支持纯文本和图文，CLI + JSON 模板 |
+| [video-analyzer](./video-analyzer/) | 视频六维分析，一键获取详情/热评/PBP/AI总结/播放地址/截图 |
 
 > ⚠️ **免责声明**：fav-organizer 会根据 LLM 的分析结果直接修改你的收藏夹（包括移动、删除、取消收藏等操作）。该工具仅提供 API 调用能力，**所有修改决策均由 LLM 生成**，请在使用前仔细审查 `plan` 命令生成的操作计划。因 LLM 判断失误或用户审查不严导致的收藏内容丢失、错乱等问题，本项目不承担任何责任。建议首次使用前备份重要收藏。
 
@@ -46,6 +47,22 @@ uv run dyn-publisher publish --text "你好，世界！"
 uv run dyn-publisher publish --text "看图片" --image ./photo.png
 ```
 
+### video-analyzer
+
+```bash
+cd video-analyzer
+uv sync
+
+# 获取完整六维分析报告（视频详情、热评、高能进度条、AI总结、播放地址、截图）
+uv run video-analyzer --bvid BV1GJ411x7
+
+# 仅获取视频详情和热评，跳过其他维度
+uv run video-analyzer --bvid BV1GJ411x7 --no-pbp --no-summary --no-playurl --no-screenshot
+
+# 指定输出文件路径
+uv run video-analyzer --bvid BV1GJ411x7 --output ./report.md
+```
+
 ### 鉴权
 
 所有工具共享 B站 凭证，使用统一的环境变量前缀：
@@ -73,13 +90,13 @@ bili-helper/
 │   ├── src/              # 源代码
 │   ├── tests/            # 测试 (310+ 用例)
 │   └── SKILL.md          # 技能定义
+├── video-analyzer/       # 视频六维分析工具
+│   ├── src/              # 源代码
+│   ├── tests/            # 测试 (25+ 用例)
+│   └── SKILL.md          # 技能定义
 ├── AGENTS.md             # 项目知识库 (AI 上下文)
 └── README.md
 ```
-
-## 参考
-
-- [bili-apis](https://github.com/xiaobin83/bili-apis-private.git) — B站 API 文档 (私有 fork，基于社区维护的 bilibili-API-collect)
 
 ---
 
@@ -103,6 +120,9 @@ cd ../fav-organizer && uv sync
 
 # 安装 dyn-publisher 动态发布工具
 cd ../dyn-publisher && uv sync
+
+# 安装 video-analyzer 视频分析工具
+cd ../video-analyzer && uv sync
 ```
 
 ### 验证安装
@@ -116,6 +136,9 @@ cd ../fav-organizer && uv run fav-organizer --help
 
 # 验证 dyn-publisher
 cd ../dyn-publisher && uv run dyn-publisher --help
+
+# 验证 video-analyzer
+cd ../video-analyzer && uv run video-analyzer --help
 ```
 
 ### 注册 Skill（OpenCode）
@@ -126,5 +149,6 @@ cd ../dyn-publisher && uv run dyn-publisher --help
 |------|--------|
 | `fav-organizer/SKILL.md` | 整理收藏夹、B站收藏管理、收藏夹分类、清理失效收藏 |
 | `dyn-publisher/SKILL.md` | 发布B站动态、发B站、B站动态发布、bilibili动态 |
+| `video-analyzer/SKILL.md` | 分析B站视频、bilibili视频分析、获取视频数据、视频详情、bvid分析 |
 
 
