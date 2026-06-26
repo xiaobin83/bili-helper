@@ -198,6 +198,31 @@ class ClassificationResultList(BaseModel):
     existing_folder_titles: list[str] = []
 
 
+class BatchMeta(BaseModel):
+    """Pagination tracker for auto-batching when total videos exceed 50.
+
+    Serialized to ``.fav-organizer/batch_meta.json``.  When present,
+    ``classify`` skips scanning and picks the next 50-item slice from
+    the existing state.json.  ``execute`` advances the offset on success.
+    """
+
+    batch_size: int = 50
+    total_videos: int
+    current_offset: int = 0
+
+    @property
+    def total_batches(self) -> int:
+        return max((self.total_videos + self.batch_size - 1) // self.batch_size, 1)
+
+    @property
+    def current_batch(self) -> int:
+        return self.current_offset // self.batch_size + 1
+
+    @property
+    def is_last_batch(self) -> bool:
+        return self.current_offset + self.batch_size >= self.total_videos
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Plan serialization (for execute command)
 # ──────────────────────────────────────────────────────────────────────

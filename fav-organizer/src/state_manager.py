@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 from .models import (
+    BatchMeta,
     ClassificationResultList,
     PlanFile,
     StateData,
@@ -39,6 +40,7 @@ class StateManager:
     FILE_CLASSIFICATION = "classification_result.json"
     FILE_PLAN = "plan.json"
     FILE_VIDEO_CACHE = "video_cache.json"
+    FILE_BATCH_META = "batch_meta.json"
 
     # ------------------------------------------------------------------
     # Directory
@@ -144,6 +146,24 @@ class StateManager:
     def has_plan(self) -> bool:
         """Return True if ``plan.json`` exists."""
         return self._exists(self.FILE_PLAN)
+
+    # ------------------------------------------------------------------
+    # Batch meta (auto-pagination when total videos > 50)
+    # ------------------------------------------------------------------
+
+    def save_batch_meta(self, meta: BatchMeta) -> Path:
+        """Persist batch pagination tracker."""
+        self._write_json(self.FILE_BATCH_META, meta.model_dump())
+        return self._path(self.FILE_BATCH_META)
+
+    def load_batch_meta(self) -> BatchMeta:
+        """Load batch pagination tracker."""
+        raw = self._read_json(self.FILE_BATCH_META)
+        return BatchMeta.model_validate(raw)
+
+    def has_batch_meta(self) -> bool:
+        """Return True if ``batch_meta.json`` exists."""
+        return self._exists(self.FILE_BATCH_META)
 
     # ------------------------------------------------------------------
     # Video cache

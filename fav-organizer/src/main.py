@@ -31,6 +31,7 @@ from src.dedup import detect_duplicates
 from src.fav_api import FavAPI
 from src.http_client import BiliHTTPClient
 from src.models import (
+    BatchMeta,
     ClassificationEntry,
     ClassificationResult,
     ClassificationResultList,
@@ -159,10 +160,63 @@ def generate_preview(plan: OrganizePlan) -> str:
 
 
 def _cleanup_pipeline_files(mgr: StateManager, plan_path: str | None) -> None:
-    """Delete intermediate pipeline files consumed by execution."""
-    mgr.delete_file(mgr.FILE_CLASSIFICATION)
-    if plan_path is None:
-        mgr.delete_file(mgr.FILE_PLAN)
+    """Advance batch or delete intermediate pipeline files after successful execution."""
+    if mgr.has_batch_meta():
+        meta = mgr.load_batch_meta()
+        meta.current_offset += meta.batch_size
+        if meta.is_last_batch:
+            mgr.delete_file(mgr.FILE_BATCH_META)
+            mgr.delete_file(mgr.FILE_CLASSIFICATION)
+            if plan_path is None:
+                mgr.delete_file(mgr.FILE_PLAN)
+            print("✅ 所有批次已完成")
+        else:
+            mgr.save_batch_meta(meta)
+            mgr.delete_file(mgr.FILE_CLASSIFICATION)
+            if plan_path is None:
+                mgr.delete_file(mgr.FILE_PLAN)
+            print(f"📦 第 {meta.current_batch}/{meta.total_batches} 批完成，运行 classify 继续下一批")
+    else:
+        mgr.delete_file(mgr.FILE_CLASSIFICATION)
+        if plan_path is None:
+            mgr.delete_file(mgr.FILE_PLAN)
+
+
+def _cmd_classify_continue(mgr: StateManager) -> int:
+    """Create the next batch's classification from existing state.json."""
+    try:
+        state = mgr.load_state()
+    except Exception as e:
+        print(f"❌ 读取状态文件失败: {e}")
+        return 1
+
+    meta = mgr.load_batch_meta()
+    video_items = [it for it in state.items_to_classify if it.type == 2]
+
+    if meta.current_offset >= len(video_items):
+        mgr.delete_file(mgr.FILE_BATCH_META)
+        print("✅ 所有批次已完成")
+        return 0
+
+    batch_end = min(meta.current_offset + meta.batch_size, len(video_items))
+    batch_items = video_items[meta.current_offset : batch_end]
+    batch_ids = {it.id for it in batch_items}
+
+    classification = ClassificationResultList(
+        classifications=[
+            ClassificationEntry(item_id=it.id, category="")
+            for it in batch_items
+        ],
+        existing_folder_titles=state.existing_folder_titles,
+    )
+    mgr.save_classification(classification)
+
+    batch_num = meta.current_batch
+    total = meta.total_batches
+    print(f"\n📦 第 {batch_num}/{total} 批 ({len(batch_items)} 个视频)")
+    print(f"📝 分类模板已更新: {mgr.state_dir / 'classification_result.json'}")
+    print(f"请编辑分类后运行: uv run fav-organizer plan")
+    return 0
 
 
 # ======================================================================
@@ -233,6 +287,10 @@ async def cmd_classify(
 
     if clear_cache:
         mgr.clear_video_cache()
+
+    # Continuation: pick next batch from existing state
+    if mgr.has_batch_meta():
+        return _cmd_classify_continue(mgr)
 
     # Auth
     creds = get_credentials()
@@ -374,22 +432,44 @@ async def cmd_classify(
         )
         state_path = mgr.save_state(state)
 
-        # Build empty classification template
-        empty_classification = ClassificationResultList(
-            classifications=[
-                ClassificationEntry(item_id=it.id, category="")
-                for it in all_items
-            ],
-            existing_folder_titles=existing_titles,
-        )
-        class_path = mgr.save_classification(empty_classification)
+        video_items = [it for it in all_items if it.type == 2]
+        video_count = len(video_items)
 
-        print(f"\n✅ 状态已保存: {state_path}")
-        print(f"📝 分类模板: {class_path}")
-        print(f"\n共 {len(all_items)} 个内容待 LLM 分类。")
-        print(f"请编辑 {class_path}，为每个 item 填入 2-6 个中文字的分类名称。")
-        print(f"已有文件夹: {', '.join(existing_titles) if existing_titles else '无'}")
-        print(f"\n完成后运行: uv run fav-organizer plan")
+        if video_count > 50:
+            meta = BatchMeta(total_videos=video_count)
+            mgr.save_batch_meta(meta)
+
+            batch_items = video_items[:50]
+            partial = ClassificationResultList(
+                classifications=[
+                    ClassificationEntry(item_id=it.id, category="")
+                    for it in batch_items
+                ],
+                existing_folder_titles=existing_titles,
+            )
+            class_path = mgr.save_classification(partial)
+
+            print(f"\n✅ 状态已保存: {state_path}")
+            print(f"📦 共 {video_count} 个视频，分 {meta.total_batches} 批处理")
+            print(f"📝 当前第 1/{meta.total_batches} 批: {class_path}")
+            print(f"请编辑分类后运行: uv run fav-organizer plan")
+            print(f"完成后再次运行 classify 进入下一批")
+        else:
+            classification = ClassificationResultList(
+                classifications=[
+                    ClassificationEntry(item_id=it.id, category="")
+                    for it in all_items
+                ],
+                existing_folder_titles=existing_titles,
+            )
+            class_path = mgr.save_classification(classification)
+
+            print(f"\n✅ 状态已保存: {state_path}")
+            print(f"📝 分类模板: {class_path}")
+            print(f"\n共 {len(all_items)} 个内容待 LLM 分类。")
+            print(f"请编辑 {class_path}，为每个 item 填入 2-6 个中文字的分类名称。")
+            print(f"已有文件夹: {', '.join(existing_titles) if existing_titles else '无'}")
+            print(f"\n完成后运行: uv run fav-organizer plan")
 
         return 0
 
@@ -448,19 +528,20 @@ def cmd_plan(*, classification_path: str | None = None) -> int:
             print(f"❌ 读取分类结果失败: {e}")
             return 1
 
-    # Validate: all items in state have classifications
     classified_ids = {c.item_id for c in classification.classifications}
     state_item_ids = {it.id for it in state.items_to_classify}
     unclassified = state_item_ids - classified_ids
-    if unclassified:
-        print(f"⚠️  {len(unclassified)} 个内容尚未分类，将标记为 '未分类'")
 
-    # Ensure all state items have a classification entry
-    existing_map = {c.item_id: c for c in classification.classifications}
-    for item_id in unclassified:
-        classification.classifications.append(
-            ClassificationEntry(item_id=item_id, category="未分类")
-        )
+    if mgr.has_batch_meta():
+        if unclassified:
+            meta = mgr.load_batch_meta()
+            print(f"📦 第 {meta.current_batch}/{meta.total_batches} 批 ({len(classified_ids)} 个已分类，{len(unclassified)} 个将在后续批次处理)")
+    elif unclassified:
+        print(f"⚠️  {len(unclassified)} 个内容尚未分类，将标记为 '未分类'")
+        for item_id in unclassified:
+            classification.classifications.append(
+                ClassificationEntry(item_id=item_id, category="未分类")
+            )
 
     # Rebuild internal state
     # Folder lookup
