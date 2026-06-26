@@ -87,6 +87,8 @@ uv run fav-organizer execute --plan my_plan.json
 
 **执行顺序：** 创建文件夹 → 移动内容（每批 ≤30，含默认收藏夹）→ 删除失效/重复内容。单批失败不影响后续。
 
+> ⚠️ **必须用户确认**：execute 为**写操作**，会实际修改用户的收藏夹内容。Agent **必须**在确认用户已审查过 `plan` 生成的整理计划并**明确同意执行**后，才能运行 execute 命令。不得在未获用户确认的情况下擅自执行。
+
 ## 独立命令
 
 ### delete-empty — 删除空收藏夹
@@ -95,7 +97,9 @@ uv run fav-organizer execute --plan my_plan.json
 uv run fav-organizer delete-empty
 ```
 
-扫描所有收藏夹，列出 `media_count == 0` 的文件夹，确认后批量删除。自动跳过默认收藏夹和稍后再看。
+扫描所有收藏夹，列出 `media_count == 0` 的文件夹，**经用户明确确认后**批量删除。自动跳过默认收藏夹和稍后再看。
+
+> ⚠️ **必须用户确认**：delete-empty 为**写操作**，会删除空收藏夹。Agent **必须**先向用户展示待删除的收藏夹列表，在获得**明确同意**后才能执行命令。不得擅自删除。
 
 ## 中间文件格式
 
