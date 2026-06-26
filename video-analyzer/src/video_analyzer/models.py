@@ -3,7 +3,7 @@
 All models use extra="ignore" to discard unexpected API fields.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -44,21 +44,50 @@ class Comment(BaseModel):
 
 
 class PBP(BaseModel):
-    """High-energy progress bar data (danmaku density)."""
+    """High-energy progress bar data (danmaku density).
+
+    New API (bvc.bilivideo.com/pbp/data) returns:
+      - ``step_sec``: sampling interval in seconds
+      - ``events.default``: array of density vertex values (float)
+    """
 
     model_config = ConfigDict(extra="ignore")
 
-    step_sec: list[int] = []  # danmaku density per second
-    duration: int = 0
+    step_sec: list[float] = []  # density vertex values per interval
+    interval: int = 0  # seconds per sampling interval
+
+
+class OutlinePart(BaseModel):
+    """A single part within an AI summary outline section."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    timestamp: int = 0
+    content: str = ""
+
+
+class OutlineItem(BaseModel):
+    """A section within the AI summary outline."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    title: str = ""
+    part_outline: list[OutlinePart] = []
+    timestamp: int = 0
 
 
 class AISummary(BaseModel):
-    """AI generated summary + outline."""
+    """AI generated summary + outline.
+
+    New API (x/web-interface/view/conclusion/get) returns:
+      - ``model_result.summary``: video summary text
+      - ``model_result.outline``: list of sections with title + parts
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     summary: str = ""
-    outline: list[str] = []
+    outline: list[OutlineItem] = []
 
 
 class PlayUrl(BaseModel):

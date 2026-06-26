@@ -159,16 +159,16 @@ def test_comment_extra_ignored():
 
 def test_pbp_model():
     """Create PBP with step_sec data."""
-    pbp = PBP(step_sec=[0, 5, 10, 3, 0], duration=5)
-    assert pbp.step_sec == [0, 5, 10, 3, 0]
-    assert pbp.duration == 5
+    pbp = PBP(step_sec=[0, 5, 10, 3, 0], interval=3)
+    assert pbp.step_sec == [0.0, 5.0, 10.0, 3.0, 0.0]
+    assert pbp.interval == 3
 
 
 def test_pbp_defaults():
-    """PBP defaults to empty list and zero duration."""
+    """PBP defaults to empty list and zero interval."""
     pbp = PBP()
     assert pbp.step_sec == []
-    assert pbp.duration == 0
+    assert pbp.interval == 0
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +178,18 @@ def test_pbp_defaults():
 
 def test_ai_summary_model():
     """Create AISummary with summary and outline."""
-    ai = AISummary(summary="这是一个AI总结", outline=["要点一", "要点二", "要点三"])
+    ai = AISummary(
+        summary="这是一个AI总结",
+        outline=[
+            {"title": "要点一", "part_outline": [{"content": "详情一"}]},
+            {"title": "要点二"},
+            {"title": "要点三"},
+        ],
+    )
     assert ai.summary == "这是一个AI总结"
-    assert ai.outline == ["要点一", "要点二", "要点三"]
+    assert len(ai.outline) == 3
+    assert ai.outline[0].title == "要点一"
+    assert ai.outline[0].part_outline[0].content == "详情一"
 
 
 def test_ai_summary_defaults():
@@ -259,8 +268,8 @@ def test_video_analysis_result_aggregate():
             Comment(rpid=1, mid="10", uname="用户甲", message="评论一"),
             Comment(rpid=2, mid="20", uname="用户乙", message="评论二"),
         ],
-        pbp=PBP(step_sec=[0, 3, 7, 2], duration=4),
-        ai_summary=AISummary(summary="视频总结", outline=["介绍", "正文", "结尾"]),
+        pbp=PBP(step_sec=[0, 3, 7, 2], interval=3),
+        ai_summary=AISummary(summary="视频总结", outline=[{"title": "介绍"}, {"title": "正文"}, {"title": "结尾"}]),
         play_url=PlayUrl(url="https://play.url", quality=64, quality_desc="720P"),
         screenshot=Screenshot(image_urls=["https://img.url/shot.png"]),
     )
@@ -278,7 +287,7 @@ def test_video_analysis_result_aggregate():
 
     # Verify pbp
     assert result.pbp is not None
-    assert result.pbp.duration == 4
+    assert result.pbp.interval == 3
     assert len(result.pbp.step_sec) == 4
 
     # Verify ai_summary

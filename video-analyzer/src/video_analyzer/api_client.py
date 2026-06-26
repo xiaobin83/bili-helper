@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-import httpx
-
-from bili_core.auth import Credentials, get_credentials
-from bili_core.http_client import BiliHTTPClient, DEFAULT_HEADERS
+from bili_core.auth import Credentials, DEFAULT_AUTH_FILE, get_credentials
+from bili_core.errors import AuthError
+from bili_core.http_client import BiliHTTPClient
 from bili_core.signing import sign_params
 
 from video_analyzer.models import (
@@ -33,46 +32,33 @@ class VideoAPIClient:
     """Aggregates 6 Bilibili API data sources into one VideoAnalysisResult.
 
     Constructor accepts an optional pre-configured ``BiliHTTPClient``.
-    When omitted, tries to load credentials via ``get_credentials()`` and
-    falls back to an unauthenticated ``httpx.AsyncClient`` for public-only
-    access if no credentials are available.
+    When omitted, loads credentials via ``get_credentials()`` (QR login
+    if none found) and raises ``AuthError`` if no valid credentials available.
     """
 
     def __init__(self, http_client: Optional[BiliHTTPClient] = None) -> None:
-        self._auth_client: Optional[BiliHTTPClient] = None
-        self._public_client: Optional[httpx.AsyncClient] = None
-
         if http_client is not None:
-            self._auth_client = http_client
+            self._client = http_client
             return
 
-        # Full credential flow: .auth.json → env vars → QR login → public fallback
-        # (same auth flow as fav-organizer via bili_core.auth)
+        # Full credential flow: .auth.json → env vars → QR login (no public fallback)
         try:
-            creds = get_credentials()
+            creds = get_credentials(auth_file=DEFAULT_AUTH_FILE)
         except (SystemExit, RuntimeError):
             creds = None
 
-        if creds is not None:
-            self._auth_client = BiliHTTPClient(
-                sessdata=creds.sessdata,
-                bili_jct=creds.bili_jct,
-                buvid3=creds.buvid3,
-            )
-        else:
-            self._public_client = httpx.AsyncClient(
-                timeout=30.0, headers=DEFAULT_HEADERS, follow_redirects=True
-            )
+        if creds is None:
+            raise AuthError("需要 B站 登录凭证，请扫码登录或设置 BILI_SESSDATA 环境变量")
+
+        self._client = BiliHTTPClient(
+            sessdata=creds.sessdata,
+            bili_jct=creds.bili_jct,
+            buvid3=creds.buvid3,
+        )
 
     async def _get(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-        """Issue a GET request via whichever client is available, return parsed JSON."""
-        if self._auth_client is not None:
-            return await self._auth_client.get(url, params=params)
-        # Fallback: plain httpx (public-only mode). At this point _public_client is
-        # guaranteed to be set because __init__ sets one of the two.
-        resp = await self._public_client.get(url, params=params)  # type: ignore[union-attr]
-        resp.raise_for_status()
-        return resp.json()
+        """Issue a GET request via the authenticated client, return parsed JSON."""
+        return await self._client.get(url, params=params)
 
     # ------------------------------------------------------------------
     # 6 fetch_* methods
@@ -90,8 +76,32 @@ class VideoAPIClient:
             raise ValueError(f"Invalid bvid '{bvid}': [{code}] {msg}")
         return VideoDetail.model_validate(raw["data"])
 
-    async def fetch_hot_comments(self, avid: int) -> list[Comment]:
-        """Return up to 10 hot comments.  Returns ``[]`` on any error."""
+    async def fetch_hot_comments(self, avid: int, bvid: str) -> list[Comment]:
+        """Return up to 10 hot comments.
+
+        Tries the Wbi-signed lazy-load endpoint first (``/reply/wbi/main``),
+        then falls back to the classic ``/v2/reply`` with sort by likes.
+        Returns ``[]`` on any error.
+        """
+        # Try Wbi-signed endpoint first (newer, returns hots + paginated replies)
+        try:
+            signed = sign_params({"type": 1, "oid": avid, "mode": 3, "ps": 10})
+            raw = await self._get(
+                f"{BASE_URL}/x/v2/reply/wbi/main",
+                params=signed,
+            )
+            if raw.get("code") == 0:
+                items: list[dict] = []
+                data = raw.get("data") or {}
+                hots = data.get("hots") or []
+                items.extend(hots)
+                replies = data.get("replies") or []
+                items.extend(replies)
+                return self._parse_comments(items[:10])
+        except Exception:
+            pass
+
+        # Fallback: classic endpoint sorted by likes
         try:
             raw = await self._get(
                 f"{BASE_URL}/x/v2/reply",
@@ -100,51 +110,80 @@ class VideoAPIClient:
             if raw.get("code") != 0:
                 return []
             hots: list[dict] = raw.get("data", {}).get("hots") or []
-            comments: list[Comment] = []
-            for item in hots[:10]:
-                member = item.get("member", {}) or {}
-                content = item.get("content", {}) or {}
-                comments.append(
-                    Comment(
-                        rpid=item.get("rpid", 0),
-                        mid=str(member.get("mid", item.get("mid", ""))),
-                        uname=member.get("uname", ""),
-                        avatar=member.get("avatar", ""),
-                        message=content.get("message", ""),
-                        like=item.get("like", 0),
-                        ctime=item.get("ctime", 0),
-                        rcount=item.get("rcount", 0),
-                    )
-                )
-            return comments
+            if hots:
+                return self._parse_comments(hots[:10])
+            replies: list[dict] = raw.get("data", {}).get("replies") or []
+            return self._parse_comments(replies[:10])
         except Exception:
             return []
 
-    async def fetch_pbp(self, bvid: str, cid: int) -> Optional[PBP]:
-        """Fetch high-energy progress bar (danmaku density) data."""
+    # ------------------------------------------------------------------
+    # Comment parser helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_comments(items: list[dict]) -> list[Comment]:
+        """Convert raw comment dicts to ``Comment`` models."""
+        comments: list[Comment] = []
+        for item in items:
+            member = item.get("member", {}) or {}
+            content = item.get("content", {}) or {}
+            comments.append(
+                Comment(
+                    rpid=item.get("rpid", 0),
+                    mid=str(member.get("mid", item.get("mid", ""))),
+                    uname=member.get("uname", ""),
+                    avatar=member.get("avatar", ""),
+                    message=content.get("message", ""),
+                    like=item.get("like", 0),
+                    ctime=item.get("ctime", 0),
+                    rcount=item.get("rcount", 0),
+                )
+            )
+        return comments
+
+    async def fetch_pbp(self, cid: int) -> Optional[PBP]:
+        """Fetch high-energy progress bar (danmaku density) data.
+
+        Uses ``bvc.bilivideo.com/pbp/data`` (the current endpoint).
+        Response: ``{step_sec: <interval_in_seconds>, events: {default: [...]}}``
+        """
         try:
             raw = await self._get(
-                f"{BASE_URL}/x/player/pbp",
-                params={"bvid": bvid, "cid": cid},
+                "https://bvc.bilivideo.com/pbp/data",
+                params={"cid": cid},
             )
-            if raw.get("code") != 0:
-                return None
-            return PBP.model_validate(raw["data"])
+            # This endpoint returns the data at top-level (no "code" field)
+            step_sec: list[float] = (
+                raw.get("events", {}).get("default") or []
+            )
+            interval: int = raw.get("step_sec", 0) or 0
+            return PBP(step_sec=step_sec, interval=interval)
         except Exception:
             return None
 
     async def fetch_ai_summary(self, aid: int, bvid: str, cid: int, up_mid: int) -> Optional[AISummary]:
-        """Fetch AI-generated video summary via Wbi-signed endpoint."""
+        """Fetch AI-generated video summary via Wbi-signed endpoint.
+
+        Uses ``/x/web-interface/view/conclusion/get`` (the current endpoint).
+        Response: ``{code: 0, data: {model_result: {summary, outline, ...}}}``
+        """
         try:
             params = {"aid": aid, "bvid": bvid, "cid": cid, "up_mid": up_mid}
             signed = sign_params(params)
             raw = await self._get(
-                f"{BASE_URL}/x/web-interface/view/ai_summary",
+                f"{BASE_URL}/x/web-interface/view/conclusion/get",
                 params=signed,
             )
             if raw.get("code") != 0:
                 return None
-            return AISummary.model_validate(raw["data"])
+            data = raw.get("data") or {}
+            if data.get("code", 0) != 0 and data.get("code") != 1:
+                return None  # code=1 means "no audio recognized" — still ok
+            model_result = data.get("model_result") or {}
+            if not model_result:
+                return None
+            return AISummary.model_validate(model_result)
         except Exception:
             return None
 
@@ -182,12 +221,16 @@ class VideoAPIClient:
         except Exception:
             return None
 
-    async def fetch_screenshot(self, cid: int) -> Optional[Screenshot]:
-        """Fetch screenshot/comic image URLs for a video."""
+    async def fetch_screenshot(self, cid: int, bvid: str) -> Optional[Screenshot]:
+        """Fetch screenshot/comic image URLs for a video.
+
+        Requires ``bvid`` (or ``aid``) to identify the video —
+        ``cid`` alone returns ``-400`` error.
+        """
         try:
             raw = await self._get(
                 f"{BASE_URL}/x/player/videoshot",
-                params={"cid": cid},
+                params={"cid": cid, "bvid": bvid},
             )
             if raw.get("code") != 0:
                 return None
@@ -230,10 +273,10 @@ class VideoAPIClient:
 
         # 2. Optional calls — each guarded by skip_flags
         if "comments" not in skip_flags:
-            result.hot_comments = await self.fetch_hot_comments(avid)
+            result.hot_comments = await self.fetch_hot_comments(avid, bvid)
 
         if "pbp" not in skip_flags:
-            result.pbp = await self.fetch_pbp(bvid, cid)
+            result.pbp = await self.fetch_pbp(cid)
 
         if "summary" not in skip_flags:
             result.ai_summary = await self.fetch_ai_summary(avid, bvid, cid, up_mid)
@@ -242,6 +285,6 @@ class VideoAPIClient:
             result.play_url = await self.fetch_play_url(bvid, cid)
 
         if "screenshot" not in skip_flags:
-            result.screenshot = await self.fetch_screenshot(cid)
+            result.screenshot = await self.fetch_screenshot(cid, bvid)
 
         return result
