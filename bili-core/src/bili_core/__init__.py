@@ -1,8 +1,15 @@
 # bili-core - Shared B站 utility library
 
-from bili_core.auth import Credentials, get_credentials, check_expired, login_flow
+from bili_core.auth import Credentials, DEFAULT_AUTH_FILE, get_credentials, check_expired, login_flow
 
-__all__ = ["Credentials", "get_credentials", "check_expired", "login_flow", "BiliHTTPClient"]
+__all__ = [
+    "Credentials",
+    "DEFAULT_AUTH_FILE",
+    "get_credentials",
+    "check_expired",
+    "login_flow",
+    "BiliHTTPClient",
+]
 
 from bili_core.errors import AuthError, CSRFError, RateLimitError, BiliAPIError, PublishError
 from bili_core.errors import (

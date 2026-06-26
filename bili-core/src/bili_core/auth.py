@@ -19,6 +19,15 @@ import httpx
 import qrcode
 import qrcode.image.svg
 
+# ── Workspace-root .auth.json (shared by all tools) ────────────────
+
+_WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+DEFAULT_AUTH_FILE: Path = _WORKSPACE_ROOT / ".auth.json"
+
+# ── Legacy CWD-based fallback (keep for backward compat) ──────────
+
+_AUTH_FILE: Path = Path.cwd() / ".auth.json"
+
 # B站 API endpoints
 _GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 _POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
