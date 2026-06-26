@@ -77,7 +77,7 @@ bili-helper/
 
 ## Agent 安装指南
 
-> 以下内容供 AI Agent 阅读，用于自动化安装 bili-helper。
+> 以下内容供 AI Agent 阅读，用于自动化安装 bili-helper 下的所有工具。
 
 ### 前置条件
 
@@ -87,17 +87,36 @@ bili-helper/
 ### 安装步骤
 
 ```bash
-cd fav-organizer && uv sync
+# 安装 bili-core 公共基础库
+cd bili-core && uv sync
+
+# 安装 fav-organizer 收藏夹整理工具
+cd ../fav-organizer && uv sync
+
+# 安装 dyn-publisher 动态发布工具
+cd ../dyn-publisher && uv sync
 ```
 
 ### 验证安装
 
 ```bash
-uv run fav-organizer --help
+# 验证 bili-core
+cd bili-core && uv run pytest tests/ -v
+
+# 验证 fav-organizer
+cd ../fav-organizer && uv run fav-organizer --help
+
+# 验证 dyn-publisher
+cd ../dyn-publisher && uv run dyn-publisher --help
 ```
 
 ### 注册 Skill（OpenCode）
 
-将 `fav-organizer/SKILL.md` 注册为 OpenCode skill，触发词：整理收藏夹、B站收藏管理、收藏夹分类、清理失效收藏。
+注册以下 Skill 文件到 OpenCode：
+
+| 文件 | 触发词 |
+|------|--------|
+| `fav-organizer/SKILL.md` | 整理收藏夹、B站收藏管理、收藏夹分类、清理失效收藏 |
+| `dyn-publisher/SKILL.md` | 发布B站动态、发B站、B站动态发布、bilibili动态 |
 
 
