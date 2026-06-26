@@ -14,6 +14,11 @@ from bili_core.auth import get_credentials
 from dyn_publisher.api import DynPublisherAPI
 from dyn_publisher.template import TemplateError, load_template, validate_template
 
+# ── Footer appended to every published dynamic ─────────────────────
+
+_GITHUB_URL = "https://github.com/xiaobin83/bili-helper"
+_PUBLISH_FOOTER = f"\nfrom bili-helper: {_GITHUB_URL}"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -137,14 +142,15 @@ async def _publish_text(creds, args) -> dict[str, Any]:
         buvid3=creds.buvid3,
     )
     try:
+        text = args.text + _PUBLISH_FOOTER
         if args.image:
             return await api.publish_image(
-                text=args.text,
+                text=text,
                 image_path=args.image,
                 category=args.category,
             )
         else:
-            return await api.publish_text(content=args.text)
+            return await api.publish_text(content=text)
     finally:
         await api.close()
 
@@ -157,7 +163,7 @@ async def _publish_from_template(creds, template: dict) -> dict[str, Any]:
     )
     try:
         dtype = template.get("type", "text")
-        text = template.get("text", "")
+        text = template.get("text", "") + _PUBLISH_FOOTER
         if dtype == "image" and template.get("images"):
             img = template["images"][0]
             return await api.publish_image(

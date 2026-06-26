@@ -53,6 +53,16 @@ uv run dyn-publisher upload-image --file ./image.png --category daily
 
 图片分类：`daily`（日常）、`draw`（绘画）、`cos`（COSPLAY）
 
+### 自动尾部标识
+
+所有通过 dyn-publisher 发布的动态，末尾会自动追加换行标识：
+
+```
+from bili-helper: https://github.com/xiaobin83/bili-helper
+```
+
+该行为不可关闭，无需用户手动添加。
+
 ### JSON 模板格式
 
 支持两种模板类型，文件必须为合法 JSON：

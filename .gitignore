@@ -1,2 +1,5 @@
 .omo/
 .DS_Store
+
+# 登录凭证（SESSDATA / bili_jct）
+.auth.json
