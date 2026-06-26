@@ -83,6 +83,14 @@ class StateManager:
     def _exists(self, filename: str) -> bool:
         return self._path(filename).exists()
 
+    def delete_file(self, filename: str) -> bool:
+        """Delete a pipeline file by name.  Returns True if deleted, False if missing."""
+        path = self._path(filename)
+        if path.exists():
+            path.unlink()
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # State (classify → plan)
     # ------------------------------------------------------------------

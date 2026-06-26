@@ -154,6 +154,18 @@ def generate_preview(plan: OrganizePlan) -> str:
 
 
 # ======================================================================
+# Pipeline cleanup
+# ======================================================================
+
+
+def _cleanup_pipeline_files(mgr: StateManager, plan_path: str | None) -> None:
+    """Delete intermediate pipeline files consumed by execution."""
+    mgr.delete_file(mgr.FILE_CLASSIFICATION)
+    if plan_path is None:
+        mgr.delete_file(mgr.FILE_PLAN)
+
+
+# ======================================================================
 # Phase 1: classify — scan, dedup, prepare for LLM classification
 # ======================================================================
 
@@ -631,6 +643,9 @@ async def cmd_execute(*, plan_path: str | None = None) -> int:
         print("正在执行整理...")
         await _execute_plan_file(plan_file, fav_api, mid=creds.mid)
         print("✅ 整理完成")
+
+        # Clean up intermediate files after successful execution
+        _cleanup_pipeline_files(mgr, plan_path)
         return 0
 
     finally:
