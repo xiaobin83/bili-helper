@@ -88,12 +88,13 @@ async def fetch_candidates(
     return deduped, counts
 
 
-def build_llm_prompt(candidates: list[VideoItem], prefs: PrefsConfig | None = None) -> str:
+def build_llm_prompt(candidates: list[VideoItem], prefs: PrefsConfig | None = None, count: int = 5) -> str:
     """Phase 5: Build the LLM recommendation prompt.
 
     Args:
         candidates: Deduplicated, filtered candidate list (capped internally at MAX_LLM_CANDIDATES).
         prefs: User preference config. When None, uses empty defaults.
+        count: Number of videos to recommend (default 5, max 10).
 
     Returns:
         Formatted prompt string ready for LLM consumption.
@@ -131,7 +132,7 @@ def build_llm_prompt(candidates: list[VideoItem], prefs: PrefsConfig | None = No
         )
 
     return RECOMMENDATION_PROMPT_TEMPLATE.format(
-        count=5,
+        count=count,
         preferences_text="\n".join(pref_lines),
         surprise_text=surprise_text,
         candidates_text="\n".join(candidate_lines),
@@ -141,12 +142,14 @@ def build_llm_prompt(candidates: list[VideoItem], prefs: PrefsConfig | None = No
 def parse_llm_result(
     llm_text: str,
     candidates: list[VideoItem],
+    count: int = 5,
 ) -> RecommendationResult | None:
     """Phase 5: Parse and validate LLM JSON response.
 
     Args:
         llm_text: Raw text response from LLM (expected to contain JSON).
         candidates: Full candidate list (used for lookups).
+        count: Expected number of recommendations (default 5, max 10).
 
     Returns:
         Validated ``RecommendationResult`` on success, ``None`` on failure.
@@ -171,7 +174,7 @@ def parse_llm_result(
     # Validate that bvids exist in candidate pool
     bvid_pool = {v.bvid for v in candidates}
     valid_bvids = [b for b in result.bvids if b in bvid_pool]
-    if len(valid_bvids) < 5:
+    if len(valid_bvids) < min(count, 5):
         logger.warning(
             "parse_llm_result: only %d/%d bvids valid in candidate pool",
             len(valid_bvids), len(result.bvids),
@@ -179,15 +182,20 @@ def parse_llm_result(
         return None
 
     return RecommendationResult(
-        bvids=valid_bvids[:5],
-        reasons=result.reasons[:5],
+        bvids=valid_bvids[:count],
+        reasons=result.reasons[:count],
         surprise_count=result.surprise_count,
     )
 
 
-def fallback_selection(candidates: list[VideoItem]) -> RecommendationResult:
-    """Fallback: select top 5 videos by view count when LLM fails."""
-    top = sorted(candidates, key=lambda v: v.view, reverse=True)[:5]
+def fallback_selection(candidates: list[VideoItem], count: int = 5) -> RecommendationResult:
+    """Fallback: select top N videos by view count when LLM fails.
+
+    Args:
+        candidates: List of VideoItem candidates.
+        count: Number of videos to select (default 5, max 10).
+    """
+    top = sorted(candidates, key=lambda v: v.view, reverse=True)[:count]
     return RecommendationResult(
         bvids=[v.bvid for v in top],
         reasons=[f"热门备选: {v.title[:40]}" for v in top],

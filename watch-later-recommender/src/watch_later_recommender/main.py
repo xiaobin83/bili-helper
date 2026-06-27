@@ -121,6 +121,11 @@ async def _main(argv: list[str] | None = None) -> int:
         print(f"   请编辑该文件设置您的偏好后重新运行。")
         return 0
 
+    # Validate count
+    if args.count < 1 or args.count > 10:
+        print(f"❌ 推荐数量必须在 1-10 之间（输入: {args.count}）")
+        return 1
+
     # Load preferences
     prefs_path = Path(args.prefs) if args.prefs else DEFAULT_PREFS_PATH
     try:
@@ -148,7 +153,7 @@ async def _main(argv: list[str] | None = None) -> int:
             return 1
 
         # Build prompt (will be used by agent to call LLM)
-        prompt = build_llm_prompt(candidates, prefs)
+        prompt = build_llm_prompt(candidates, prefs, count=args.count)
 
         # Print candidate info for agent to use
         print(f"📝 LLM Prompt ({len(prompt)} chars):")
@@ -160,7 +165,7 @@ async def _main(argv: list[str] | None = None) -> int:
         # For dry-run, show what would be added
         if args.dry_run:
             # Use fallback for demonstration
-            result = fallback_selection(candidates)
+            result = fallback_selection(candidates, count=args.count)
             _print_results(candidates, counts, result.bvids, result.reasons)
             return 0
 
@@ -181,7 +186,7 @@ async def _main(argv: list[str] | None = None) -> int:
         # 3. Call add_recommendations() with selected bvids
         #
         # For CLI mode, use fallback selection
-        result = fallback_selection(candidates)
+        result = fallback_selection(candidates, count=args.count)
 
         # Add to toview
         rec_dicts = [

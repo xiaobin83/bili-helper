@@ -44,12 +44,12 @@ class VideoItem(BaseModel):
 
 
 class RecommendationResult(BaseModel):
-    """LLM recommendation output — exactly 5 videos with reasons."""
+    """LLM recommendation output — N videos with reasons (N=1..10)."""
 
     model_config = ConfigDict(extra="ignore")
 
-    bvids: list[str] = Field(..., min_length=5, max_length=5)
-    reasons: list[str] = Field(..., min_length=5, max_length=5)
+    bvids: list[str] = Field(..., min_length=1, max_length=10)
+    reasons: list[str] = Field(..., min_length=1, max_length=10)
     surprise_count: int = 0
 
     def __init__(self, **data):
