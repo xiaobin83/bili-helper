@@ -5,13 +5,13 @@
 
 ## OVERVIEW
 
-B站 up主助手 —— 编写 OpenCode skills 辅助 B站 up主 完成各项日常工作。Skills 通过调用 B站 API（以 `../bili-apis` 为参考）实现数据获取、内容管理、数据分析等功能。
+B站 up主助手 —— 编写 OpenCode skills 辅助 B站 up主 完成各项日常工作。Skills 通过调用 B站 API（以 `viking://resources/xiaobin83/bili-apis` 为参考）实现数据获取、内容管理、数据分析等功能。
 
 所有 skill 共享 `bili-core/` 基础库，提供统一鉴权、HTTP 客户端、签名算法和错误处理。开发新 skill 时**必须优先重用它**，不要自行实现重复功能。
 
 ## REFERENCE: bili-apis
 
-路径: `../bili-apis` — 社区维护的第三方 B站 API 文档 (`bilibili-API-collect`)。
+路径: `viking://resources/xiaobin83/bili-apis` — 社区维护的第三方 B站 API 文档 (`bilibili-API-collect`)。
 
 ### 结构
 
@@ -110,17 +110,17 @@ workspace/
 ### Skill 编写规范
 
 1. **单一职责**: 每个 skill 聚焦一个 up主 工作场景 (如: 数据分析、视频管理、评论管理)
-2. **API 优先**: 所有 B站 数据操作必须基于 `../bili-apis` 文档，不自行猜测接口
+2. **API 优先**: 所有 B站 数据操作必须基于 `viking://resources/xiaobin83/bili-apis` 文档，不自行猜测接口
 3. **优先复用 bili-core**: 鉴权、HTTP 客户端、签名、错误类型等公共能力已由 `bili-core/` 提供，**不要自行重复实现**。引用方式见上方 bili-core 章节
 4. **鉴权处理**: 使用 `bili_core.auth.get_credentials()` 获取凭证（自动走 `.auth.json` → 环境变量 → QR 登录），通过 `BiliHTTPClient` 发送请求（自动附带 Cookie 和反爬 header）
-5. **错误处理**: 优先使用 `bili_core.errors` 定义的异常类型（`AuthError`、`CSRFError`、`RateLimitError`、`BiliAPIError`），参考 B站 公共错误码 (`bili-apis/docs/misc/errcode.md`)
+5. **错误处理**: 优先使用 `bili_core.errors` 定义的异常类型（`AuthError`、`CSRFError`、`RateLimitError`、`BiliAPIError`），参考 B站 公共错误码 (`viking://resources/xiaobin83/bili-apis/docs/misc/errcode.md`)
 6. **签名合规**: HTTP 接口签名使用 `bili_core.signing.sign_params()`（Wbi），不要自行实现签名算法
 7. **使用持久化背景任务**: 长时间操作(如爬取数据)使用 OpenCode 后台任务机制
 8. **使用系统浏览器**: 任何需要浏览器窗口的操作通过 Playwright MCP 实现
 
 ### 开发工作流
 
-1. 查阅 `../bili-apis/docs/` 定位所需 API
+1. 查阅 `viking://resources/xiaobin83/bili-apis/docs/` 定位所需 API
 2. 理解鉴权方式与签名算法
 3. 确认 `bili-core/` 是否已提供所需能力（auth/HTTP/签名/错误处理），避免重复实现
 4. 编写 SKILL.md 定义技能
@@ -135,7 +135,7 @@ workspace/
 
 ## NOTES
 
-- B站 API 可能随时变更，`bili-apis` 为社区维护版本，实际使用时建议自行验证
-- gRPC 接口需要设备指纹模拟 (FawkesReq, Device, Network bin headers)，参考 `grpc_api/readme.md`
+- B站 API 可能随时变更，`viking://resources/xiaobin83/bili-apis` 为社区维护版本，实际使用时建议自行验证
+- gRPC 接口需要设备指纹模拟 (FawkesReq, Device, Network bin headers)，参考 `viking://resources/xiaobin83/bili-apis/grpc_api/readme.md`
 - 风控策略敏感: 频繁请求可能触发验证码或封禁，skill 需内置请求频率控制
 - 视频流/直播流 URL 具有时效性，需实时获取
