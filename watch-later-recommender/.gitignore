@@ -1,0 +1,6 @@
+*.pyc
+__pycache__/
+.watch-later-cache/
+.pytest_cache/
+.coverage
+.venv/

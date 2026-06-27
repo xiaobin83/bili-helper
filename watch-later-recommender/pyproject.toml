@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "watch-later-recommender"
+version = "0.1.0"
+description = "Bilibili watch-later smart recommender - recommends 5 videos via LLM adds to toview list"
+authors = [{name = "Bili-Helper"}]
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["bilibili", "watch-later", "recommender", "bili", "稍后再看"]
+
+dependencies = [
+    "bili-core",
+    "httpx>=0.25.0",
+    "pydantic>=2.7.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv.sources]
+bili-core = { path = "../bili-core", editable = true }
+
+[project.scripts]
+watch-later-recommender = "watch_later_recommender.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/watch_later_recommender"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
