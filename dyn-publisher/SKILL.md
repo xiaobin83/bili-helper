@@ -19,13 +19,13 @@ export BILI_BILI_JCT="..."
 export BILI_BUVID3="..."  # 可选
 ```
 
-凭证优先级：`--auth-file` 参数 > `./.auth.json` > `~/.bili-helper/auth.json` > 环境变量 > 二维码登录。
+凭证优先级：`--auth-file` 参数 > 环境变量 > `./.auth.json` (CWD) > `~/.bili-helper/auth.json` > 二维码登录。
 
 首次登录或二维码登录后，凭证自动保存到 `~/.bili-helper/auth.json`。
 
-调用时建议显式指定 auth 文件路径：
+也可用 `--env-prefix` 指定自定义环境变量前缀（默认 `BILI_`）：
 ```bash
-uv run dyn-publisher publish --auth-file ~/.bili-helper/auth.json --text "..."
+uv run dyn-publisher publish --env-prefix MYAPP_ --text "..."
 ```
 
 凭证获取：浏览器 DevTools (F12) → Application → Cookies → `.bilibili.com`

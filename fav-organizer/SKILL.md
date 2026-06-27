@@ -114,7 +114,7 @@ uv run fav-organizer delete-empty
 
 ## 鉴权处理
 
-凭证优先级：`.auth.json`（二维码登录）> 环境变量 > 自动触发登录。
+凭证优先级：`~/.bili-helper/auth.json`（上次登录保存）> 环境变量 > `./.auth.json`（CWD 兼容）> 自动触发二维码登录。
 
 推荐使用统一的环境变量前缀（与项目其他工具共享）：
 

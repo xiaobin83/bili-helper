@@ -17,10 +17,7 @@ dependencies = [
     "bili-core",
     "httpx>=0.25.0",
     "pydantic>=2.7.0",
-    "fastmcp>=3.0.0",
     "qrcode>=7.4.0",
-    "asyncio>=3.4.3",
-    "curl-cffi>=0.15.0",
 ]
 
 [tool.uv.sources]

@@ -301,7 +301,7 @@ async def cmd_classify(
         return _cmd_classify_continue(mgr)
 
     # Auth
-        creds = get_credentials(env_prefix="FAV_", auth_file=DEFAULT_AUTH_FILE)
+    creds = get_credentials(env_prefix="BILI_", auth_file=DEFAULT_AUTH_FILE)
     if check_expired(creds):
         print("❌ 登录已过期，请重新获取 SESSDATA")
         return 1
@@ -717,7 +717,7 @@ async def cmd_execute(*, plan_path: str | None = None) -> int:
         return 0
 
     # Auth
-        creds = get_credentials(env_prefix="FAV_", auth_file=DEFAULT_AUTH_FILE)
+    creds = get_credentials(env_prefix="BILI_", auth_file=DEFAULT_AUTH_FILE)
     if check_expired(creds):
         print("❌ 登录已过期，请重新获取 SESSDATA")
         return 1
@@ -747,7 +747,7 @@ async def cmd_delete_empty() -> int:
 
     Skips the default folder (B站 does not allow deleting it).
     """
-        creds = get_credentials(env_prefix="FAV_", auth_file=DEFAULT_AUTH_FILE)
+    creds = get_credentials(env_prefix="BILI_", auth_file=DEFAULT_AUTH_FILE)
     if check_expired(creds):
         print("❌ 登录已过期，请重新获取 SESSDATA")
         return 1

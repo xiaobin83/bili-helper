@@ -42,6 +42,9 @@ _AUTH_FILE_CANDIDATES: list[Path] = [
     _AUTH_FILE_DEFAULT,  # new standard location
 ]
 
+# Public alias for downstream consumers (legacy name, kept for compatibility)
+DEFAULT_AUTH_FILE: Path = _AUTH_FILE_DEFAULT
+
 
 # ---------------------------------------------------------------------------
 # Credentials

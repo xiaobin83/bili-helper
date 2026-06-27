@@ -40,7 +40,7 @@ uv run video-analyzer --bvid BV1GJ411x7 --output ./my_report.md
 
 ## 鉴权处理
 
-凭证优先级：`.auth.json`（二维码登录）> 环境变量 > 降级模式。
+凭证优先级：`~/.bili-helper/auth.json`（上次登录保存）> 环境变量 > `./.auth.json`（CWD 兼容）> 二维码登录。
 
 ```bash
 # 推荐方式（与项目其他工具共享）
@@ -51,7 +51,7 @@ export BILI_BUVID3="..."  # 可选
 
 凭证获取：浏览器 DevTools (F12) → Application → Cookies → `.bilibili.com`
 
-**降级策略**：无鉴权时，可获取的视频数据（如视频详情）正常返回；需登录态的数据（如热门评论、高能进度条）在报告中标注为"需登录"。
+> 无凭证时自动弹出二维码登录，登录成功后保存到 `~/.bili-helper/auth.json` 供下次使用。
 
 ## 工作流
 
@@ -77,11 +77,11 @@ export BILI_BUVID3="..."  # 可选
 
 | 维度 | 来源 API | 数据说明 |
 |------|----------|----------|
-| 热门评论 | `v2/reply/wbi/main` | 前 10 热评（点赞数排序），含回复数、点赞数 |
-| 高能进度条 (PBP) | `x/player/pagelist?bvid=` | 视频各时间段的弹幕密度分布 |
-| AI 总结 | `x/web-interface/related/content?bvid=` | B站 服务端生成的 AI 视频摘要 |
-| 播放地址 (PlayURL) | `x/player/playurl?bvid=` | 视频流 URL（清晰度、格式、过期时间） |
-| 视频截图 | `x/web-interface/archive/stat` + 截图服务 | 视频封面及关键帧截图地址 |
+| 热门评论 | `x/v2/reply/wbi/main` (Wbi 签名) → fallback `x/v2/reply` (按点赞排序) | 前 10 热评，含回复数、点赞数 |
+| 高能进度条 (PBP) | `bvc.bilivideo.com/pbp/data?cid=` | 视频各时间段的弹幕密度分布，返回 `step_sec` 间隔 + `events.default` 密度数组 |
+| AI 总结 | `x/web-interface/view/conclusion/get` (Wbi 签名，需 `aid`/`bvid`/`cid`/`up_mid`) | B站 AI 生成的视频内容摘要 + 大纲 |
+| 播放地址 (PlayURL) | `x/player/playurl?bvid=&cid=&qn=80` | 1080P 视频流 URL（清晰度、格式、备用地址） |
+| 视频截图 | `x/player/videoshot?cid=&bvid=` | 视频关键帧截图地址（需同时传 `cid` 和 `bvid`） |
 
 ### 步骤 3 — 生成 Markdown 报告
 
