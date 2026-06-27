@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from bili_core.auth import DEFAULT_AUTH_FILE, get_credentials
+from bili_core.auth import get_credentials
 
 from dyn_publisher.api import DynPublisherAPI
 from dyn_publisher.template import TemplateError, load_template, validate_template
@@ -91,7 +91,7 @@ def main() -> None:
     try:
         creds = get_credentials(
             env_prefix=args.env_prefix,
-            auth_file=Path(args.auth_file) if args.auth_file else DEFAULT_AUTH_FILE,
+            auth_file=Path(args.auth_file) if args.auth_file else None,
         )
     except Exception as e:
         print(f"Auth error: {e}", file=sys.stderr)
@@ -146,7 +146,7 @@ async def _publish_text(creds, args) -> dict[str, Any]:
         if args.image:
             return await api.publish_image(
                 text=text,
-                image_path=args.image,
+                image_paths=args.image,
                 category=args.category,
             )
         else:
@@ -165,11 +165,13 @@ async def _publish_from_template(creds, template: dict) -> dict[str, Any]:
         dtype = template.get("type", "text")
         text = template.get("text", "") + _PUBLISH_FOOTER
         if dtype == "image" and template.get("images"):
-            img = template["images"][0]
+            imgs = template["images"]
+            paths = [img["file"] for img in imgs]
+            cats = [img.get("category", "daily") for img in imgs]
             return await api.publish_image(
                 text=text,
-                image_path=img["file"],
-                category=img.get("category", "daily"),
+                image_paths=paths,
+                categories=cats,
             )
         else:
             return await api.publish_text(content=text)

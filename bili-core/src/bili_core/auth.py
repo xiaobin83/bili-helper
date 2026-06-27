@@ -19,15 +19,6 @@ import httpx
 import qrcode
 import qrcode.image.svg
 
-# ── Workspace-root .auth.json (shared by all tools) ────────────────
-
-_WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-DEFAULT_AUTH_FILE: Path = _WORKSPACE_ROOT / ".auth.json"
-
-# ── Legacy CWD-based fallback (keep for backward compat) ──────────
-
-_AUTH_FILE: Path = Path.cwd() / ".auth.json"
-
 # B站 API endpoints
 _GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"
 _POLL_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/poll"
@@ -44,7 +35,12 @@ _POLL_SCANNED = 86090
 _POLL_EXPIRED = 86038
 _POLL_SUCCESS = 0
 
-_AUTH_FILE: Path = Path.cwd() / ".auth.json"
+_AUTH_FILE_DEFAULT: Path = Path.home() / ".bili-helper" / "auth.json"
+
+_AUTH_FILE_CANDIDATES: list[Path] = [
+    Path.cwd() / ".auth.json",  # backward compat — CWD
+    _AUTH_FILE_DEFAULT,  # new standard location
+]
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +94,7 @@ def _mask(value: str, visible: int = 4) -> str:
 def _load_from_file(auth_file: Optional[Path] = None) -> Optional[Credentials]:
     """Try loading credentials from .auth.json."""
     if auth_file is None:
-        auth_file = _AUTH_FILE
+        auth_file = _AUTH_FILE_DEFAULT
     if not auth_file.exists():
         return None
     try:
@@ -162,25 +158,31 @@ def get_credentials(
     """Return valid credentials, triggering QR login if necessary.
 
     Priority:
-        1. ``auth_file`` (defaults to ``.auth.json`` in CWD)
+        1. Explicit ``auth_file`` parameter
         2. ``{env_prefix}SESSDATA`` / ``{env_prefix}BILI_JCT`` env vars
-        3. Interactive QR code login flow
+        3. ``.auth.json`` in CWD (backward compat)
+        4. ``~/.bili-helper/auth.json`` (recommended)
+        5. Interactive QR code login flow
     """
-    if auth_file is None:
-        auth_file = _AUTH_FILE
-
-    # Priority 1: file
-    creds = _load_from_file(auth_file)
-    if creds is not None:
-        return creds
+    # Priority 1: explicit auth_file
+    if auth_file is not None:
+        creds = _load_from_file(auth_file)
+        if creds is not None:
+            return creds
 
     # Priority 2: environment
     creds = _load_from_env(env_prefix)
     if creds is not None:
         return creds
 
-    # Priority 3: QR login
-    return login_flow(auth_file=auth_file)
+    # Priority 3: search known file locations
+    for candidate in _AUTH_FILE_CANDIDATES:
+        creds = _load_from_file(candidate)
+        if creds is not None:
+            return creds
+
+    # Priority 4: QR login → saves to standard location
+    return login_flow(auth_file=auth_file or _AUTH_FILE_DEFAULT)
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +214,10 @@ def check_expired(
     If no creds provided, attempts to load from file or env.
     """
     if creds is None:
-        creds = _load_from_file(_AUTH_FILE)
+        for candidate in _AUTH_FILE_CANDIDATES:
+            creds = _load_from_file(candidate)
+            if creds is not None:
+                break
         if creds is None:
             creds = _load_from_env(env_prefix)
         if creds is None:
@@ -355,7 +360,8 @@ def _extract_credentials(resp: httpx.Response) -> Credentials:
 def _save_credentials(creds: Credentials, auth_file: Optional[Path] = None) -> None:
     """Save credentials to auth file."""
     if auth_file is None:
-        auth_file = _AUTH_FILE
+        auth_file = _AUTH_FILE_DEFAULT
+    auth_file.parent.mkdir(parents=True, exist_ok=True)
     data = asdict(creds)
     auth_file.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"

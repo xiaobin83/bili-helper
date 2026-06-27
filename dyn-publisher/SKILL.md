@@ -19,7 +19,14 @@ export BILI_BILI_JCT="..."
 export BILI_BUVID3="..."  # 可选
 ```
 
-凭证优先级：`.auth.json` > 环境变量 > 二维码登录。
+凭证优先级：`--auth-file` 参数 > `./.auth.json` > `~/.bili-helper/auth.json` > 环境变量 > 二维码登录。
+
+首次登录或二维码登录后，凭证自动保存到 `~/.bili-helper/auth.json`。
+
+调用时建议显式指定 auth 文件路径：
+```bash
+uv run dyn-publisher publish --auth-file ~/.bili-helper/auth.json --text "..."
+```
 
 凭证获取：浏览器 DevTools (F12) → Application → Cookies → `.bilibili.com`
 
@@ -75,9 +82,19 @@ from bili-helper: https://github.com/xiaobin83/bili-helper
 
 {
   "type": "image",
-  "text": "图片说明文字",
+  "text": "单图说明文字",
   "images": [
     {"file": "path/to/image.png", "category": "daily"}
+  ]
+}
+
+{
+  "type": "image",
+  "text": "多图说明文字",
+  "images": [
+    {"file": "path/to/a.png", "category": "daily"},
+    {"file": "path/to/b.png", "category": "draw"},
+    {"file": "path/to/c.png", "category": "cos"}
   ]
 }
 ```
@@ -88,8 +105,9 @@ from bili-helper: https://github.com/xiaobin83/bili-helper
 |------|------|
 | `type` | 必须为 `"text"` 或 `"image"` |
 | `text` | 必须存在且非空字符串 |
-| `images` | `type=image` 时必须存在且非空数组 |
+| `images` | `type=image` 时必须存在且非空数组（最多 9 张） |
 | `images[].file` | 每个图片项必须包含 `file` 字段 |
+| `images[].category` | 可选，默认 `"daily"`，支持 `"daily"`/`"draw"`/`"cos"` |
 
 ### 环境变量
 

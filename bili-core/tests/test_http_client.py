@@ -18,14 +18,14 @@ def _make_mock_response(code: int = 0, status: int = 200) -> MagicMock:
 
 
 class TestBiliHTTPClient:
-    """Unit tests for BiliHTTPClient — all curl_cffi calls are mocked."""
+    """Unit tests for BiliHTTPClient — all httpx calls are mocked."""
 
     # ── test 1: get() delegates to session.get ────────────────────────────
 
-    @patch("bili_core.http_client.curl_requests.AsyncSession")
-    async def test_get_request(self, mock_async_session: MagicMock) -> None:
+    @patch("httpx.AsyncClient")
+    async def test_get_request(self, mock_async_client: MagicMock) -> None:
         """Verify get() calls session.get once with the correct URL."""
-        mock_instance = mock_async_session.return_value
+        mock_instance = mock_async_client.return_value
         mock_instance.get = AsyncMock(return_value=_make_mock_response())
 
         client = BiliHTTPClient("sess", "jct", min_interval=0)
@@ -38,10 +38,10 @@ class TestBiliHTTPClient:
 
     # ── test 2: post() injects csrf into form data ────────────────────────
 
-    @patch("bili_core.http_client.curl_requests.AsyncSession")
-    async def test_post_adds_csrf(self, mock_async_session: MagicMock) -> None:
+    @patch("httpx.AsyncClient")
+    async def test_post_adds_csrf(self, mock_async_client: MagicMock) -> None:
         """post() must inject the ``csrf`` field into the POST body."""
-        mock_instance = mock_async_session.return_value
+        mock_instance = mock_async_client.return_value
         mock_instance.post = AsyncMock(return_value=_make_mock_response())
 
         client = BiliHTTPClient("sess", "jct", min_interval=0)
@@ -54,11 +54,11 @@ class TestBiliHTTPClient:
 
     # ── test 3: post_json() with csrf_in_url=True ─────────────────────────
 
-    @patch("bili_core.http_client.curl_requests.AsyncSession")
-    async def test_post_json_with_url_csrf(self, mock_async_session: MagicMock) -> None:
+    @patch("httpx.AsyncClient")
+    async def test_post_json_with_url_csrf(self, mock_async_client: MagicMock) -> None:
         """post_json(csrf_in_url=True) must inject csrf as URL query param
         and send a JSON body (``json=``, not ``data=``)."""
-        mock_instance = mock_async_session.return_value
+        mock_instance = mock_async_client.return_value
         mock_instance.post = AsyncMock(return_value=_make_mock_response())
 
         client = BiliHTTPClient("sess", "jct", min_interval=0)
@@ -79,10 +79,10 @@ class TestBiliHTTPClient:
 
     # ── test 4: code -101 raises AuthError ────────────────────────────────
 
-    @patch("bili_core.http_client.curl_requests.AsyncSession")
-    async def test_auth_error_raised(self, mock_async_session: MagicMock) -> None:
+    @patch("httpx.AsyncClient")
+    async def test_auth_error_raised(self, mock_async_client: MagicMock) -> None:
         """Response code -101 must raise AuthError."""
-        mock_instance = mock_async_session.return_value
+        mock_instance = mock_async_client.return_value
         mock_instance.get = AsyncMock(return_value=_make_mock_response(code=-101))
 
         client = BiliHTTPClient("sess", "jct", min_interval=0)
@@ -92,10 +92,10 @@ class TestBiliHTTPClient:
 
     # ── test 5: code -111 raises CSRFError ────────────────────────────────
 
-    @patch("bili_core.http_client.curl_requests.AsyncSession")
-    async def test_csrf_error_raised(self, mock_async_session: MagicMock) -> None:
+    @patch("httpx.AsyncClient")
+    async def test_csrf_error_raised(self, mock_async_client: MagicMock) -> None:
         """Response code -111 must raise CSRFError."""
-        mock_instance = mock_async_session.return_value
+        mock_instance = mock_async_client.return_value
         mock_instance.get = AsyncMock(return_value=_make_mock_response(code=-111))
 
         client = BiliHTTPClient("sess", "jct", min_interval=0)
@@ -105,18 +105,18 @@ class TestBiliHTTPClient:
 
     # ── test 6: buvid3 appears in Cookie header ───────────────────────────
 
-    @patch("bili_core.http_client.curl_requests.AsyncSession")
-    async def test_buvid3_in_cookie(self, mock_async_session: MagicMock) -> None:
+    @patch("httpx.AsyncClient")
+    async def test_buvid3_in_cookie(self, mock_async_client: MagicMock) -> None:
         """When buvid3 is provided it must appear in the Cookie header;
         when omitted it must not."""
         # -- with buvid3
         BiliHTTPClient("sess", "jct", buvid3="BV123456")
-        call_headers_with = mock_async_session.call_args.kwargs["headers"]
+        call_headers_with = mock_async_client.call_args.kwargs["headers"]
         assert "buvid3=BV123456" in call_headers_with["Cookie"]
 
-        mock_async_session.reset_mock()
+        mock_async_client.reset_mock()
 
         # -- without buvid3
         BiliHTTPClient("sess", "jct")
-        call_headers_without = mock_async_session.call_args.kwargs["headers"]
+        call_headers_without = mock_async_client.call_args.kwargs["headers"]
         assert "buvid3" not in call_headers_without["Cookie"]

@@ -114,7 +114,7 @@ class DynPublisherAPI:
             "extension": extension,
             "up_choose_comment": int(up_choose_comment),
             "up_close_comment": int(close_comment),
-            "csrf_token": self._client._bili_jct,
+            "csrf_token": self._client.bili_jct,
         }
         # BiliHTTPClient.post() auto-injects csrf, so we only add csrf_token
         result = await self._client.post(url, data=data)
@@ -125,22 +125,26 @@ class DynPublisherAPI:
     async def publish_image(
         self,
         text: str,
-        image_path: str,
+        image_paths: str | list[str],
         *,
         category: str = CATEGORY_DAILY,
+        categories: list[str] | None = None,
         close_comment: bool = False,
         up_choose_comment: bool = False,
     ) -> dict[str, Any]:
-        """Publish an image-text dynamic.
+        """Publish an image-text dynamic (supports 1–9 images).
 
-        Two-step process:
+        Two-step process per image:
         1. Upload image via ``upload_bfs`` → get image URL + dimensions
-        2. Create dynamic with image via ``x/dynamic/feed/create/dyn`` (JSON)
+        2. Create dynamic with all images via ``x/dynamic/feed/create/dyn`` (JSON)
 
         Args:
             text: Text caption for the dynamic.
-            image_path: Local path to the image file (jpg/png/gif).
-            category: Image category — ``"daily"``, ``"draw"``, or ``"cos"``.
+            image_paths: Single image path or list of paths (max 9).
+            category: Default image category for all images — ``"daily"``,
+                ``"draw"``, or ``"cos"``. Overridden per-image by *categories*.
+            categories: Per-image category list (must match *image_paths* length).
+                If ``None``, all images use *category*.
             close_comment: Disable comments on this dynamic.
             up_choose_comment: Enable curated comments (精选评论).
 
@@ -148,27 +152,53 @@ class DynPublisherAPI:
             Result from ``create/dyn`` endpoint, e.g.:
             ``{"code": 0, "data": {"dyn_id_str": "...", "dyn_type": 2, ...}}``
         """
-        # Step 1: Upload image
-        upload_result = await self.upload_image(image_path, category=category)
-        _check_publish_error(upload_result)
+        # Normalize to list
+        if isinstance(image_paths, str):
+            paths = [image_paths]
+            cats = [category]
+        else:
+            paths = image_paths
+            if categories is not None:
+                if len(categories) != len(paths):
+                    return {
+                        "code": PUBLISH_ERR_PARAM,
+                        "message": f"categories length ({len(categories)}) != paths length ({len(paths)})",
+                    }
+                cats = categories
+            else:
+                cats = [category] * len(paths)
 
-        img_data = upload_result.get("data", {})
-        image_url = img_data.get("image_url", "")
-        if not image_url:
-            return {"code": PUBLISH_ERR_NO_IMAGE, "message": "No image url after upload"}
+        if not paths:
+            return {"code": PUBLISH_ERR_NO_IMAGE, "message": "No images provided"}
 
-        # Step 2: Build and send the create/dyn request
+        # Step 1: Upload all images
+        uploaded: list[dict[str, Any]] = []
+        for path, cat in zip(paths, cats):
+            upload_result = await self.upload_image(path, category=cat)
+            _check_publish_error(upload_result)
+
+            img_data = upload_result.get("data", {})
+            image_url = img_data.get("image_url", "")
+            if not image_url:
+                return {
+                    "code": PUBLISH_ERR_NO_IMAGE,
+                    "message": f"No image url after upload: {path}",
+                }
+            uploaded.append(img_data)
+
+        # Step 2: Build pics array and send the create/dyn request
         dyn_url = "https://api.bilibili.com/x/dynamic/feed/create/dyn"
 
         contents = [{"raw_text": text, "type": 1, "biz_id": ""}]
 
         pics = [
             {
-                "img_src": image_url,
-                "img_width": img_data.get("image_width", 0),
-                "img_height": img_data.get("image_height", 0),
+                "img_src": d["image_url"],
+                "img_width": d.get("image_width", 0),
+                "img_height": d.get("image_height", 0),
                 "img_size": 0,  # upload_bfs response does not include img_size
             }
+            for d in uploaded
         ]
 
         payload: dict[str, Any] = {
@@ -181,7 +211,7 @@ class DynPublisherAPI:
                 },
                 "scene": SCENE_IMAGE,
                 "upload_id": (
-                    f"{self._client._bili_jct}"
+                    f"{self._client.bili_jct}"
                     f"_{int(time.time())}"
                     f"_{random.randint(1000, 9999)}"
                 ),

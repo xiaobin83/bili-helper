@@ -15,7 +15,6 @@ keywords = ["bilibili", "bili", "core", "utility"]
 
 dependencies = [
     "httpx>=0.25.0",
-    "curl-cffi>=0.15.0",
     "qrcode>=7.4.0",
     "pydantic>=2.7.0",
 ]
