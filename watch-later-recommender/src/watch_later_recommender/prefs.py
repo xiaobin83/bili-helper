@@ -21,9 +21,9 @@ categories:
   - name: "生活"
     tids: [160]
     keywords: []
-exclude_categories:
-  - name: "游戏"
-    tids: [4]
+# exclude_categories:      # 取消注释后可按需排除分区
+#   - name: "游戏"
+#     tids: [4]
 surprise_ratio: 0.2      # 惊喜内容比例 (0.0-0.5)
 max_duration: 1800       # 最大视频时长(秒), 可选
 """
