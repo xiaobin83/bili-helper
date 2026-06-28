@@ -1,11 +1,11 @@
 ---
 name: watch-later-recommender
-description: B站（Bilibili）稍后再看智能推荐工具。从热门榜、排行榜和个性化推荐中精选视频，基于用户偏好自动加入稍后再看列表。当用户提到稍后再看推荐、帮我推荐视频、智能推荐稍后再看、B站视频推荐、找值得看的视频、watch later推荐、智能推荐、推荐几个视频时触发。
+description: B站（Bilibili）视频智能推荐工具。从热门榜、排行榜和个性化推荐中精选视频，基于用户偏好自动加入稍后再看列表或收藏夹。当用户提到稍后再看推荐、帮我推荐视频、智能推荐稍后再看、B站视频推荐、找值得看的视频、watch later推荐、智能推荐、推荐几个视频时触发。
 ---
 
-# watch-later-recommender — B站 稍后再看智能推荐
+# watch-later-recommender — B站 智能推荐
 
-从全站热门、分区排行榜和个性化推荐中获取候选视频，依据用户偏好配置文件精选视频，自动添加到稍后再看列表。支持 LLM 智能推荐，也支持无 LLM 时的按播放量降序回退。
+从全站热门、分区排行榜和个性化推荐中获取候选视频，依据用户偏好配置文件精选视频，自动添加到稍后再看列表或收藏夹。支持 LLM 智能推荐，也支持无 LLM 时的按播放量降序回退。`--target fav` 将推荐结果存入收藏夹（LLM 或回退逻辑自动选择/创建文件夹），`--topic` 支持按主题精筛。
 
 ## 使用方式
 
@@ -29,8 +29,17 @@ export BILI_BUVID3="..."  # 可选
 # 完整流程：获取候选 → LLM 精选 → 添加到稍后再看
 uv run watch-later-recommender
 
-# 干跑模式：只看推荐结果，不实际添加到稍后再看
+# 推荐到收藏夹（LLM 自动选择/创建收藏夹）
+uv run watch-later-recommender --target fav
+
+# 推荐特定主题到收藏夹
+uv run watch-later-recommender --target fav --topic "编程教程"
+
+# 干跑模式：只看推荐结果，不实际添加
 uv run watch-later-recommender --dry-run
+
+# 干跑模式预览收藏夹推荐
+uv run watch-later-recommender --dry-run --target fav --topic "健身"
 
 # 首次使用：生成偏好配置文件模板
 uv run watch-later-recommender --init-prefs
@@ -50,6 +59,8 @@ uv run watch-later-recommender --count 3
 | `--init-prefs` | `flag` | 初始化偏好配置文件（创建模板） |
 | `--prefs` | `str` | 自定义偏好配置文件路径（默认 `~/.bili-helper/.watch-later-prefs.yaml`） |
 | `--count` | `int` | 推荐视频数量（默认 5，最大 10） |
+| `--target` | `str` | 推荐目标：`toview`（稍后再看，默认）/ `fav`（收藏夹） |
+| `--topic` | `str` | 推荐主题关键词（仅 `--target fav` 时生效） |
 | `--auth-file` | `str` | 自定义凭证文件路径 |
 | `--env-prefix` | `str` | 环境变量前缀（默认 `BILI_`） |
 
@@ -121,11 +132,11 @@ uv run watch-later-recommender
 完整流程步骤：
 
 ```
-┌─────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌───────────┐   ┌──────────┐
-│  Phase 1 │   │  Phase 2 │   │  Phase 3 │   │  Phase 4 │   │  Phase 5  │   │  Phase 6 │
-│ 热门榜   │ → │ 排行榜   │ → │ 个性化推 │ → │ 去重+过滤 │ → │ LLM 精选  │ → │ 添加到   │
-│  (x50)   │   │  (x100)  │   │ 荐 (x14) │   │ 广告+已存 │   │ 5 个视频  │   │ 稍后再看 │
-└─────────┘   └──────────┘   └──────────┘   └──────────┘   └───────────┘   └──────────┘
+┌─────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌───────────┐   ┌──────────────────┐
+│  Phase 1 │   │  Phase 2 │   │  Phase 3 │   │  Phase 4 │   │  Phase 5  │   │    Phase 6       │
+│ 热门榜   │ → │ 排行榜   │ → │ 个性化推 │ → │ 去重+过滤 │ → │ LLM 精选  │ → │ 添加到目标       │
+│  (x50)   │   │  (x100)  │   │ 荐 (x14) │   │ 广告+已存 │   │ 5 个视频  │   │ toview 或 收藏夹  │
+└─────────┘   └──────────┘   └──────────┘   └──────────┘   └───────────┘   └──────────────────┘
 ```
 
 | 阶段 | 数据源 | API 端点 | 说明 |
@@ -133,9 +144,9 @@ uv run watch-later-recommender
 | Phase 1 | 全站热门 | `x/web-interface/popular` | 获取前 50 个热门视频，无需登录 |
 | Phase 2 | 全站排行榜 | `x/web-interface/ranking/v2` | 获取前 100 个排行视频，无需登录 |
 | Phase 3 | 首页个性化推荐 | `x/web-interface/index/top/rcmd` | 获取个性化推荐，需要登录 |
-| Phase 4 | 去重+过滤 | — | 去重、过滤广告、排除已在稍后再看的视频，剩余最多 20 个候选 |
-| Phase 5 | LLM 精选 | — | 根据用户偏好从候选池中精选，生成推荐理由 |
-| Phase 6 | 添加到稍后再看 | `x/v2/history/toview/add` | 逐条添加，检查容量上限（100 个） |
+| Phase 4 | 去重+过滤 | — | 去重、过滤广告、排除已在稍后再看的视频，剩余最多 20 个候选。`--target fav` 时跳过与已收藏视频的去重 |
+| Phase 5 | LLM 精选 | — | 根据用户偏好从候选池中精选，生成推荐理由。`--target fav` 时 prompt 附带收藏夹列表和主题信息 |
+| Phase 6 | 添加到目标 | `x/v2/history/toview/add` / `x/v3/fav/resource/deal` | `--target toview`：添加到稍后再看，检查容量上限（100 个）。`--target fav`：添加到收藏夹，自动选择或新建文件夹 |
 
 ### 场景 2：首次使用（初始化偏好配置）
 
@@ -164,15 +175,22 @@ uv run watch-later-recommender --dry-run
 此工具生成 LLM prompt 后，由 Agent 调用 LLM 进行推荐。LLM prompt 包含：
 
 1. 用户偏好描述（偏好分类、排除分类、惊喜比例、最大时长）
-2. 候选视频列表（最多 20 个，含标题、分区、UP主、播放量、点赞数、时长）
-3. JSON 输出格式要求（`bvids`、`reasons`、`surprise_count`）
+2. **收藏夹列表**（仅 `--target fav` 时，列出用户收藏夹，供 LLM 选择目标文件夹）
+3. **主题描述**（仅 `--topic` 时，告知 LLM 优先推荐主题相关的视频）
+4. 候选视频列表（最多 20 个，含标题、分区、UP主、播放量、点赞数、时长）
+5. JSON 输出格式要求：
+   - `--target toview`：`bvids`、`reasons`、`surprise_count`
+   - `--target fav`：额外包含 `target_action`（`add_to_existing` / `create_new`）、`target_folder`、`folder_description`
 
 LLM 输出通过 `parse_llm_result()` 解析和校验：
 - 提取 JSON 并验证结构
 - 校验所有 bvid 是否在候选池中
 - 校验数量一致
+- （`--target fav`）校验 `target_action` 和 `target_folder`
 
-若 LLM 调用失败，自动回退为按播放量排序选择热门视频。
+若 LLM 调用失败，自动回退：
+- `--target toview`：按播放量排序选择热门视频
+- `--target fav`：按播放量排序 → 统计分区分布 → 匹配偏好分类 → 选择或新建收藏夹
 
 ## 错误处理
 
@@ -182,7 +200,7 @@ LLM 输出通过 `parse_llm_result()` 解析和校验：
 | 1 | 运行错误（未获取到候选视频、登录过期） | 检查网络和登录状态 |
 | 2 | 请求频率过高（限流） | 等待片刻后重试 |
 | 3 | 未找到偏好配置文件 | 先运行 `--init-prefs` 生成模板 |
-| 4 | 稍后再看列表空间不足（≥95/100） | 先清理稍后再看列表再重试 |
+| 4 | 稍后再看列表空间不足（≥95/100，仅 `--target toview`） | 先清理稍后再看列表再重试 |
 
 | B站 API 错误码 | 含义 | 处理建议 |
 |----------------|------|---------|
