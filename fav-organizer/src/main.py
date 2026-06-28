@@ -786,6 +786,41 @@ async def cmd_delete_empty() -> int:
         await http.close()
 
 
+async def cmd_list() -> int:
+    """List all favorites folders — read-only, no side effects."""
+    creds = get_credentials(env_prefix="BILI_", auth_file=DEFAULT_AUTH_FILE)
+    if check_expired(creds):
+        print("❌ 登录已过期，请重新获取 SESSDATA")
+        return 1
+
+    http = BiliHTTPClient(sessdata=creds.sessdata, bili_jct=creds.bili_jct)
+    try:
+        fav_api = FavAPI(
+            http_client=http,
+            bili_jct=creds.bili_jct,
+            signing=sign_params,
+        )
+
+        folders = await fav_api.list_all_folders(up_mid=creds.mid)
+        if not folders:
+            print("没有找到收藏夹")
+            return 0
+
+        # Filter out watch-later
+        display_folders = [f for f in folders if f.title != "稍后再看"]
+
+        print(f"\n📂 收藏夹列表 (共 {len(display_folders)} 个):\n")
+        for i, f in enumerate(display_folders, 1):
+            suffix = "  (默认)" if f.is_default else ""
+            print(f"  {i:2d}. {f.title:<20s} {f.media_count:>4d} 个视频{suffix}")
+
+        print()
+        return 0
+
+    finally:
+        await http.close()
+
+
 async def _execute_plan_file(
     plan_file: PlanFile,
     fav_api: FavAPI,
@@ -959,6 +994,7 @@ def cli() -> None:
     )
 
     sub.add_parser("delete-empty", help="删除所有空收藏夹（跳过默认收藏夹）")
+    sub.add_parser("list", help="列出所有收藏夹名称与视频数（只读，无副作用）")
 
     args = parser.parse_args()
 
@@ -978,6 +1014,8 @@ def cli() -> None:
         sys.exit(asyncio.run(cmd_execute(plan_path=args.plan)))
     elif args.command == "delete-empty":
         sys.exit(asyncio.run(cmd_delete_empty()))
+    elif args.command == "list":
+        sys.exit(asyncio.run(cmd_list()))
     else:
         parser.print_help()
         sys.exit(1)

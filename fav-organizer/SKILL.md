@@ -91,6 +91,23 @@ uv run fav-organizer execute --plan my_plan.json
 
 ## 独立命令
 
+### list — 列出收藏夹（只读）
+
+```bash
+uv run fav-organizer list
+```
+
+列出所有收藏夹的名称和视频数量。**只读操作**，无副作用：不扫描失效内容、不获取视频信息、不写任何状态文件。
+
+输出示例：
+```
+📂 收藏夹列表 (共 12 个):
+
+  1. 默认收藏夹             23 个视频  (默认)
+  2. AI Agent               15 个视频
+  3. 编程教程                8 个视频
+```
+
 ### delete-empty — 删除空收藏夹
 
 ```bash
