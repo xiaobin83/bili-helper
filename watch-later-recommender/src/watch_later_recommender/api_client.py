@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from bili_core.auth import Credentials
@@ -306,6 +307,42 @@ class BiliAPIClient:
             return {"code": -1, "message": str(e)}
 
     # ------------------------------------------------------------------
+    # Source 4: Search (搜索)
+    # ------------------------------------------------------------------
+
+    async def search_videos(self, keyword: str, page: int = 1, order: str = "totalrank") -> list[VideoItem]:
+        """Search videos by keyword. Requires auth (Wbi signed).
+
+        Returns up to 20 video results per page.
+        Returns [] on error or no auth.
+        """
+        if not self._has_auth:
+            logger.info("search_videos: skipped (no auth)")
+            return []
+        try:
+            raw = await self._signed_get("/x/web-interface/wbi/search/type", {
+                "search_type": "video",
+                "keyword": keyword,
+                "order": order,
+                "duration": 0,
+                "tids": 0,
+                "page": page,
+            })
+            if raw.get("code") != 0:
+                logger.warning("search_videos: code=%s", raw.get("code"))
+                return []
+            data = raw.get("data") or {}
+            result = data.get("result") or []
+            items = []
+            for item in result:
+                if item.get("type") == "video":
+                    items.append(self._parse_search_item(item))
+            return items
+        except Exception as e:
+            logger.warning("search_videos failed: %s", e)
+            return []
+
+    # ------------------------------------------------------------------
     # Parsers
     # ------------------------------------------------------------------
 
@@ -358,4 +395,47 @@ class BiliAPIClient:
             pic=item.get("pic", ""),
             rcmd_reason=rcmd_reason_obj.get("content") if isinstance(rcmd_reason_obj, dict) else None,
             is_commercial=False,
+        )
+
+    @staticmethod
+    def _parse_search_item(item: dict) -> VideoItem:
+        """Parse a video item from web-interface/wbi/search/type response.
+
+        Search API uses different field names and structures compared to
+        popular/ranking/rcmd endpoints. See task spec for field mapping.
+        """
+        # Strip HTML tags from title (search wraps keywords in <em class="keyword">)
+        raw_title = item.get("title", "")
+        title = re.sub(r"<[^>]+>", "", raw_title) if raw_title else ""
+
+        # Parse duration string (e.g. "4:18", "58:6", "1:02:30") to seconds
+        dur_str = item.get("duration", "0")
+        duration = 0
+        try:
+            parts = dur_str.split(":")
+            if len(parts) == 2:
+                duration = int(parts[0]) * 60 + int(parts[1])
+            elif len(parts) == 3:
+                duration = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            else:
+                duration = int(dur_str) if dur_str.isdigit() else 0
+        except (ValueError, IndexError):
+            duration = 0
+
+        return VideoItem(
+            aid=item.get("aid", 0),
+            bvid=item.get("bvid", ""),
+            title=title,
+            tid=int(item.get("typeid", 0)),
+            tname=item.get("typename", ""),
+            desc=item.get("description", ""),
+            duration=duration,
+            owner_name=item.get("author", ""),
+            owner_mid=item.get("mid", 0),
+            view=item.get("play", 0),
+            like=0,  # Not in search response
+            pubdate=item.get("pubdate", 0),
+            pic=item.get("pic", ""),
+            rcmd_reason=None,  # Not in search response
+            is_commercial=False,  # Not in search response
         )

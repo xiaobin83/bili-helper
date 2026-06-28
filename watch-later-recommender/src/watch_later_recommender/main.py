@@ -31,6 +31,7 @@ from watch_later_recommender.recommender import (
     fetch_candidates,
     fetch_folders,
     parse_llm_result,
+    search_candidates,
 )
 
 
@@ -71,7 +72,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--topic",
         type=str,
         default=None,
-        help="推荐主题关键词（仅 --target fav 时生效）",
+        help="推荐主题关键词，使用搜索获取相关视频作为候选池",
     )
     parser.add_argument(
         "--auth-file",
@@ -173,7 +174,12 @@ async def _main(argv: list[str] | None = None) -> int:
 
     # Run pipeline
     async with BiliAPIClient(creds) as client:
-        candidates, counts = await fetch_candidates(client)
+        # Use search when topic is provided
+        if args.topic:
+            print(f"🔍 正在搜索「{args.topic}」相关视频...")
+            candidates, counts = await search_candidates(client, args.topic)
+        else:
+            candidates, counts = await fetch_candidates(client)
 
         if not candidates:
             print("❌ 未获取到候选视频")

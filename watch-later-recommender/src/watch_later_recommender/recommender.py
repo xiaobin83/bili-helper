@@ -94,6 +94,58 @@ async def fetch_candidates(
     return deduped, counts
 
 
+async def search_candidates(
+    client: BiliAPIClient,
+    topic: str,
+    max_pages: int = 2,
+) -> tuple[list[VideoItem], dict[str, int]]:
+    """Phases 1-4 (search variant): Search candidates by topic keyword.
+
+    Replaces popular/ranking/rcmd when --topic is provided.
+    Fetches multiple pages of search results, deduplicates, filters.
+
+    Args:
+        client: Authenticated BiliAPIClient.
+        topic: Search keyword / topic.
+        max_pages: Number of search result pages to fetch (default 2, ~40 videos).
+
+    Returns:
+        Tuple of (deduped_candidates, counts_dict).
+        counts_dict keys: search_total, before_dedup, after_dedup, ads_removed, candidates.
+    """
+    counts: dict[str, int] = {"search_total": 0, "before_dedup": 0, "after_dedup": 0, "ads_removed": 0, "candidates": 0}
+    combined: list[VideoItem] = []
+
+    for page in range(1, max_pages + 1):
+        items = await client.search_videos(topic, page=page)
+        if page == 1:
+            counts["search_total"] = len(items)
+        combined.extend(items)
+
+    counts["before_dedup"] = len(combined)
+
+    # Dedup by bvid
+    seen: set[str] = set()
+    deduped: list[VideoItem] = []
+    for v in combined:
+        if v.bvid not in seen:
+            seen.add(v.bvid)
+            deduped.append(v)
+    counts["after_dedup"] = len(deduped)
+
+    # Filter ads
+    filtered = [v for v in deduped if not v.is_ad()]
+    ads_removed = len(deduped) - len(filtered)
+    counts["ads_removed"] = ads_removed
+
+    # Cap at MAX_LLM_CANDIDATES (sort by view descending first)
+    filtered.sort(key=lambda v: v.view, reverse=True)
+    candidates = filtered[:MAX_LLM_CANDIDATES]
+    counts["candidates"] = len(candidates)
+
+    return candidates, counts
+
+
 async def fetch_folders(client: BiliAPIClient, up_mid: int) -> list[Folder]:
     """Fetch user's favorites folders sorted by media_count descending."""
     folders = await client.list_fav_folders(up_mid)
