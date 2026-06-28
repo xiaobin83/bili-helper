@@ -1,11 +1,15 @@
 """watch-later-recommender CLI — B站 智能推荐.
 
-Usage:
-    uv run watch-later-recommender                        # Full pipeline (toview)
-    uv run watch-later-recommender --target fav           # Recommend to favorites
-    uv run watch-later-recommender --target fav --topic "编程教程"  # Topic-specific fav
-    uv run watch-later-recommender --dry-run              # No actual add
-    uv run watch-later-recommender --init-prefs           # Create config
+Two-phase workflow:
+  Phase 1 — generate prompt:
+      uv run watch-later-recommender --target fav
+  Phase 2 — apply LLM result (no --target needed, inferred from LLM output):
+      uv run watch-later-recommender --apply-llm-result llm-output.txt
+
+Other options:
+      uv run watch-later-recommender --target fav --topic "编程教程"
+      uv run watch-later-recommender --dry-run
+      uv run watch-later-recommender --init-prefs
 """
 
 from __future__ import annotations
@@ -20,14 +24,11 @@ from bili_core.errors import AuthError, RateLimitError
 
 from watch_later_recommender.api_client import BiliAPIClient
 from watch_later_recommender.prefs import DEFAULT_PREFS_PATH, init_prefs, load_prefs
-from watch_later_recommender.models import Folder
 from watch_later_recommender.recommender import (
     TOVIEW_CAPACITY_LIMIT,
     TOVIEW_WARN_THRESHOLD,
     add_recommendations,
     build_llm_prompt,
-    determine_fav_target,
-    fallback_selection,
     fetch_candidates,
     fetch_folders,
     parse_llm_result,
@@ -66,7 +67,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="toview",
         choices=["toview", "fav"],
-        help="推荐目标: toview（稍后再看，默认）| fav（收藏夹）",
+        help="推荐目标（仅生成 prompt 时需要）: toview（稍后再看，默认）| fav（收藏夹）。使用 --apply-llm-result 时无需指定，由 LLM 结果自动推断",
     )
     parser.add_argument(
         "--folder-name",
@@ -91,6 +92,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=str,
         default="BILI_",
         help="环境变量前缀（默认: BILI_）",
+    )
+    parser.add_argument(
+        "--apply-llm-result",
+        type=str,
+        default=None,
+        metavar="PATH_OR_JSON",
+        help="应用 LLM 推荐结果：JSON 文件路径、JSON 字符串，或 '-' 从 stdin 读取。无此参数时只输出 prompt，不执行添加",
     )
     return parser.parse_args(argv)
 
@@ -144,6 +152,49 @@ def _print_results(
         print()
 
 
+def _load_llm_text(source: str) -> str | None:
+    """Load LLM output from a file path, stdin ('-'), or inline JSON string.
+
+    Returns ``None`` if the source cannot be read.
+    """
+    if source == "-":
+        import sys as _sys
+        return _sys.stdin.read()
+
+    src_path = Path(source)
+    if src_path.exists():
+        try:
+            return src_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+
+    # Treat as inline JSON string
+    return source
+
+
+def _print_llm_summary(llm_text: str) -> None:
+    """Print the human-readable portion of LLM output (text before JSON block)."""
+    import re
+
+    # Find where the JSON block starts (```json fence or raw {)
+    m = re.search(r"```(?:json)?\s*\n", llm_text)
+    if m:
+        summary = llm_text[: m.start()].strip()
+    else:
+        json_start = llm_text.find("{")
+        if json_start > 0:
+            summary = llm_text[:json_start].strip()
+        else:
+            return  # No summary to print
+
+    if summary:
+        print("💬 LLM 推荐总结:")
+        print("-" * 60)
+        print(summary)
+        print("-" * 60)
+        print()
+
+
 async def _main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
@@ -172,7 +223,7 @@ async def _main(argv: list[str] | None = None) -> int:
     try:
         creds = get_credentials(env_prefix=args.env_prefix, auth_file=auth_file)
     except (SystemExit, RuntimeError):
-        print("⚠️ 未登录，将跳过个性化推荐和稍后再看添加功能")
+        print("⚠️ 未登录，将跳过个性化推荐和添加功能")
         creds = None
 
     if not creds or not creds.sessdata:
@@ -180,7 +231,7 @@ async def _main(argv: list[str] | None = None) -> int:
 
     # Run pipeline
     async with BiliAPIClient(creds) as client:
-        # Use search when topic is provided
+        # Phase 1-4: Fetch candidates
         if args.topic:
             print(f"🔍 正在搜索「{args.topic}」相关视频...")
             candidates, counts = await search_candidates(client, args.topic)
@@ -191,48 +242,89 @@ async def _main(argv: list[str] | None = None) -> int:
             print("❌ 未获取到候选视频")
             return 1
 
-        # Build prompt (will be used by agent to call LLM)
-        if args.target == "fav":
+        # --- Without --apply-llm-result: generate prompt and exit ---
+        if not args.apply_llm_result:
+            folders = await fetch_folders(client, creds.mid) if (creds and args.target == "fav") else []
+
+            prompt = build_llm_prompt(
+                candidates, prefs, count=args.count,
+                target=args.target, folders=folders, topic=args.topic,
+            )
+
+            print(f"📝 LLM Prompt ({len(prompt)} chars):")
+            print(prompt)
+            print()
+            print("=" * 60)
+            print()
+            print("💡 将上述 prompt 发送给 LLM，然后用 --apply-llm-result 传入 LLM 的返回结果来执行添加：")
+            print(f"   uv run watch-later-recommender"
+                  f"{' --folder-name ' + args.folder_name if args.folder_name else ''}"
+                  f"{' --topic ' + args.topic if args.topic else ''}"
+                  f" --count {args.count}"
+                  f" --apply-llm-result llm-output.txt")
+            return 0
+
+        # --- With --apply-llm-result: parse, validate, execute ---
+        llm_text = _load_llm_text(args.apply_llm_result)
+        if not llm_text:
+            print(f"❌ 无法读取 LLM 结果: {args.apply_llm_result}")
+            return 1
+
+        result = parse_llm_result(llm_text, candidates, args.count)
+        if not result:
+            print("❌ LLM 结果解析失败，请确认输出包含有效的 JSON 数据")
+            return 1
+
+        # Infer target from LLM result (no need for --target on this invocation)
+        if result.target_action in ("add_to_existing", "create_new"):
+            effective_target = "fav"
+        else:
+            effective_target = "toview"
+
+        # Fetch folders (needed for fav target — LLM decides, not CLI arg)
+        if effective_target == "fav":
             folders = await fetch_folders(client, creds.mid) if creds else []
         else:
             folders = []
 
-        prompt = build_llm_prompt(
-            candidates, prefs, count=args.count,
-            target=args.target, folders=folders, topic=args.topic,
-        )
+        # Print the human-readable summary part (before the JSON)
+        _print_llm_summary(llm_text)
 
-        # Print candidate info for agent to use
-        print(f"📝 LLM Prompt ({len(prompt)} chars):")
-        print(prompt)
-        print()
-        print("=" * 60)
-        print()
-
-        # For dry-run, show what would be added
-        if args.dry_run:
-            if args.target == "fav":
-                result = fallback_selection(candidates, count=args.count)
-                if args.folder_name:
-                    folder_name = args.folder_name
-                    exists = any(f.title == folder_name for f in folders)
-                    action = "add_to_existing" if exists else "create_new"
-                else:
-                    action, folder_name, folder_desc = determine_fav_target(
-                        result.bvids, candidates, folders, prefs,
-                    )
-                _print_results(
-                    candidates, counts, result.bvids, result.reasons,
-                    target=args.target, target_folder=folder_name,
-                )
-                print(f"📁 目标收藏夹: {folder_name} ({'新建' if action == 'create_new' else '添加到已有'})")
+        # Determine target folder for fav
+        folder_name = ""
+        action = "add_to_existing"
+        if effective_target == "fav":
+            if args.folder_name:
+                folder_name = args.folder_name
+                exists = any(f.title == folder_name for f in folders)
+                action = "add_to_existing" if exists else "create_new"
             else:
-                result = fallback_selection(candidates, count=args.count)
-                _print_results(candidates, counts, result.bvids, result.reasons)
+                folder_name = result.target_folder or "默认收藏夹"
+                action = result.target_action or "add_to_existing"
+
+        # Build rec_dicts from LLM result
+        rec_dicts = [
+            {
+                "bvid": bvid,
+                "aid": next((v.aid for v in candidates if v.bvid == bvid), 0),
+                "title": "",
+                "reason": reason,
+            }
+            for bvid, reason in zip(result.bvids, result.reasons)
+        ]
+
+        # Phase 6: Execute add (or dry-run)
+        if args.dry_run:
+            _print_results(
+                candidates, counts, result.bvids, result.reasons,
+                target=effective_target, target_folder=folder_name,
+            )
+            if effective_target == "fav":
+                print(f"📁 目标收藏夹: {folder_name} ({'新建' if action == 'create_new' else '添加到已有'})")
+            print("🔍 干跑模式，未实际添加")
             return 0
 
-        if args.target == "toview":
-            # Get toview list count for capacity check
+        if effective_target == "toview":
             toview_list = await client.fetch_toview_list()
             toview_count = len(toview_list)
 
@@ -243,71 +335,28 @@ async def _main(argv: list[str] | None = None) -> int:
                 )
                 return 4
 
-            # In agent execution context, the orchestrator would:
-            # 1. Send prompt to LLM via task()
-            # 2. Call parse_llm_result() on the response
-            # 3. Call add_recommendations() with selected bvids
-            #
-            # For CLI mode, use fallback selection
-            result = fallback_selection(candidates, count=args.count)
-
-            # Add to toview
-            rec_dicts = [
-                {"bvid": bvid, "aid": next((v.aid for v in candidates if v.bvid == bvid), 0), "title": "", "reason": reason}
-                for bvid, reason in zip(result.bvids, result.reasons)
-            ]
             add_result = await add_recommendations(
-                client, rec_dicts, target="toview", toview_count=toview_count, dry_run=args.dry_run,
+                client, rec_dicts, target="toview", toview_count=toview_count,
             )
-
-            _print_results(candidates, counts, result.bvids, result.reasons)
-
-            if add_result.get("success"):
-                print(f"✅ {add_result.get('message', '操作成功')}")
-                return 0
-            else:
-                if add_result.get("message"):
-                    print(f"⚠️ {add_result['message']}")
-                return 0 if add_result.get("added") else 4
-
         else:
-            # fav target — fallback selection, determine folder, add to fav
-            result = fallback_selection(candidates, count=args.count)
-
-            # Use --folder-name when specified, otherwise auto-determine
-            if args.folder_name:
-                folder_name = args.folder_name
-                folder_desc = ""
-                # Check if folder exists; if not, create it
-                exists = any(f.title == folder_name for f in folders)
-                action = "add_to_existing" if exists else "create_new"
-            else:
-                action, folder_name, folder_desc = determine_fav_target(
-                    result.bvids, candidates, folders, prefs,
-                )
-
-            rec_dicts = [
-                {"bvid": bvid, "aid": next((v.aid for v in candidates if v.bvid == bvid), 0), "title": "", "reason": reason}
-                for bvid, reason in zip(result.bvids, result.reasons)
-            ]
             add_result = await add_recommendations(
                 client, rec_dicts, target="fav",
                 target_folder=folder_name, target_action=action,
-                folders=folders, dry_run=args.dry_run,
+                folders=folders,
             )
 
-            _print_results(
-                candidates, counts, result.bvids, result.reasons,
-                target=args.target, target_folder=folder_name,
-            )
+        _print_results(
+            candidates, counts, result.bvids, result.reasons,
+            target=effective_target, target_folder=folder_name,
+        )
 
-            if add_result.get("success"):
-                print(f"✅ {add_result.get('message', '操作成功')}")
-                return 0
-            else:
-                if add_result.get("message"):
-                    print(f"⚠️ {add_result['message']}")
-                return 0 if add_result.get("added") else 4
+        if add_result.get("success"):
+            print(f"✅ {add_result.get('message', '操作成功')}")
+            return 0
+        else:
+            if add_result.get("message"):
+                print(f"⚠️ {add_result['message']}")
+            return 0 if add_result.get("added") else 4
 
 
 def main(argv: list[str] | None = None) -> int:
