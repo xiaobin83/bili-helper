@@ -38,11 +38,18 @@ uv run watch-later-recommender --target fav --topic "AI Agent" --count 5
 
 ### 阶段 2：调用 LLM 并应用结果
 
-1. **Agent 将 prompt 发送给 LLM**（通过 `task()` 或直接调用），不添加额外指令。
-2. LLM 返回的结果包含两部分：
+1. **Agent 读取 OpenViking 用户记忆**，将相关偏好/事件/实体追加到 prompt 末尾作为额外上下文。
+   ```text
+   ## 用户记忆（Agent 从 OpenViking 查询）
+   - 用户之前曾要求将推荐视频放入「AI Agent」收藏夹
+   - 用户对 AI Agent 开发相关内容感兴趣
+   ```
+   Agent 自行决定搜索哪些记忆关键词（如当前 topic、用户偏好分类名），不限格式和数量。
+2. **Agent 将增强后的完整 prompt 发送给 LLM**（通过 `task()` 或直接调用），不添加其他额外指令。
+3. LLM 返回的结果包含两部分：
    - **人性化推荐总结**（文本）：给用户阅读
    - **结构化 JSON**（在 ` ```json ` 代码块中）：给工具解析
-3. **Agent 将 LLM 返回的完整文本保存到临时文件**，然后执行：
+4. **Agent 将 LLM 返回的完整文本保存到临时文件**，然后执行：
 
 ```bash
 # 应用 LLM 结果（--target 不需要，工具自动从 JSON 推断）
@@ -95,16 +102,21 @@ LLM prompt 会指导 LLM 输出如下格式：
 output = bash("uv run watch-later-recommender --target fav --topic 'AI Agent' --count 5")
 prompt = extract_prompt_from_output(output)
 
-# Step 2: 调用 LLM（注意：不添加额外指令，prompt 已自包含）
-llm_response = task(category="ultrabrain", prompt=prompt)
+# Step 2: 查询 OpenViking 记忆，追加到 prompt
+memories = memsearch(query="AI Agent 开发 偏好 收藏夹", target_uri="viking://user/opencode/memories/")
+memory_section = "## 用户记忆\n" + "\n".join(f"- {m.summary}" for m in memories)
+augmented_prompt = prompt + "\n\n" + memory_section
 
-# Step 3: 保存 LLM 返回的完整文本（含总结和 JSON）
+# Step 3: 将增强后的 prompt 发送给 LLM
+llm_response = task(category="ultrabrain", prompt=augmented_prompt)
+
+# Step 4: 保存 LLM 返回的完整文本（含总结和 JSON）
 write("/tmp/llm-output.json", llm_response)
 
-# Step 4: 应用结果（不需要 --target fav，工具自动推断）
+# Step 5: 应用结果（不需要 --target fav，工具自动推断）
 result = bash("uv run watch-later-recommender --apply-llm-result /tmp/llm-output.json")
 
-# Step 5: 将人性化总结和添加结果展示给用户
+# Step 6: 将人性化总结和添加结果展示给用户
 ```
 
 ## 使用方式
