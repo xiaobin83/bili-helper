@@ -13,8 +13,9 @@ from typing import Any
 
 from bili_core.auth import Credentials
 from bili_core.http_client import BiliHTTPClient
+from bili_core.signing import sign_params
 
-from watch_later_recommender.models import VideoItem
+from watch_later_recommender.models import Folder, VideoItem
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class BiliAPIClient:
         bili_jct = creds.bili_jct if creds else ""
         buvid3 = creds.buvid3 if creds else ""
         self._has_auth = bool(creds and creds.sessdata)
+        self._bili_jct = bili_jct
         self._client = BiliHTTPClient(
             sessdata=sessdata,
             bili_jct=bili_jct,
@@ -187,6 +189,120 @@ class BiliAPIClient:
             return {"code": raw.get("code", -1), "message": raw.get("message", "")}
         except Exception as e:
             logger.warning("add_to_toview failed: %s", e)
+            return {"code": -1, "message": str(e)}
+
+    # ------------------------------------------------------------------
+    # Signed GET helper
+    # ------------------------------------------------------------------
+
+    async def _signed_get(self, path: str, params: dict | None = None) -> dict:
+        """GET with Wbi signature. Requires auth."""
+        raw_params = dict(params or {})
+        signed = sign_params(raw_params)
+        return await self._client.get(f"{BASE_URL}{path}", params=signed)
+
+    # ------------------------------------------------------------------
+    # User info
+    # ------------------------------------------------------------------
+
+    async def get_current_mid(self) -> int:
+        """Get current user's numeric mid from nav endpoint. Requires auth."""
+        if not self._has_auth:
+            return 0
+        try:
+            raw = await self._client.get(f"{BASE_URL}/x/web-interface/nav")
+            data = raw.get("data") or {}
+            return data.get("mid") or data.get("mid_plus") or 0
+        except Exception as e:
+            logger.warning("get_current_mid failed: %s", e)
+            return 0
+
+    # ------------------------------------------------------------------
+    # Favorites folder operations
+    # ------------------------------------------------------------------
+
+    async def list_fav_folders(self, up_mid: int) -> list[Folder]:
+        """Fetch all favorites folders for the user. Requires auth + Wbi.
+
+        Args:
+            up_mid: User's numeric mid.
+
+        Returns:
+            List of Folder objects. Empty list on error.
+        """
+        if not self._has_auth:
+            logger.info("list_fav_folders: skipped (no auth)")
+            return []
+
+        try:
+            raw = await self._signed_get(
+                "/x/v3/fav/folder/created/list-all",
+                {"up_mid": up_mid},
+            )
+            if raw.get("code") != 0:
+                logger.warning("list_fav_folders: code=%s", raw.get("code"))
+                return []
+            data = raw.get("data")
+            if not data or not isinstance(data, dict):
+                return []
+            folder_dicts = data.get("list", []) or []
+            return [Folder(**f) for f in folder_dicts]
+        except Exception as e:
+            logger.warning("list_fav_folders failed: %s", e)
+            return []
+
+    async def add_to_fav_folder(self, aid: int, add_media_ids: list[int]) -> dict:
+        """Add a video to one or more favorites folders. Requires auth.
+
+        Args:
+            aid: Video avid.
+            add_media_ids: Target folder media_id(s).
+
+        Returns:
+            Dict with code and message.
+        """
+        if not self._has_auth:
+            return {"code": -1, "message": "未登录，无法添加到收藏夹"}
+
+        try:
+            raw = await self._client.post(
+                f"{BASE_URL}/x/v3/fav/resource/add",
+                data={
+                    "resources": f"{aid}:2",  # type=2 for video
+                    "add_media_ids": ",".join(str(m) for m in add_media_ids),
+                },
+            )
+            return {"code": raw.get("code", -1), "message": raw.get("message", "")}
+        except Exception as e:
+            logger.warning("add_to_fav_folder failed: %s", e)
+            return {"code": -1, "message": str(e)}
+
+    async def create_fav_folder(self, name: str, intro: str = "", privacy: int = 0) -> dict:
+        """Create a new favorites folder. Requires auth.
+
+        Args:
+            name: Folder title.
+            intro: Optional description.
+            privacy: 0=public, 1=private.
+
+        Returns:
+            Dict with code, message, data (may contain media_id).
+        """
+        if not self._has_auth:
+            return {"code": -1, "message": "未登录，无法创建收藏夹"}
+
+        try:
+            raw = await self._client.post(
+                f"{BASE_URL}/x/v3/fav/folder/add",
+                data={"title": name, "intro": intro, "privacy": privacy},
+            )
+            return {
+                "code": raw.get("code", -1),
+                "message": raw.get("message", ""),
+                "data": raw.get("data") or {},
+            }
+        except Exception as e:
+            logger.warning("create_fav_folder failed: %s", e)
             return {"code": -1, "message": str(e)}
 
     # ------------------------------------------------------------------

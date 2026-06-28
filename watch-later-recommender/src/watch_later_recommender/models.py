@@ -43,6 +43,19 @@ class VideoItem(BaseModel):
         return False
 
 
+class Folder(BaseModel):
+    """B站 collection folder — identified by media_id."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int                  # media_id
+    fid: int = 0
+    mid: int = 0
+    attr: int = 0
+    title: str               # folder name
+    media_count: int = 0
+
+
 class RecommendationResult(BaseModel):
     """LLM recommendation output — N videos with reasons (N=1..10)."""
 
@@ -51,6 +64,9 @@ class RecommendationResult(BaseModel):
     bvids: list[str] = Field(..., min_length=1, max_length=10)
     reasons: list[str] = Field(..., min_length=1, max_length=10)
     surprise_count: int = 0
+    target_action: str = "toview"       # "toview" | "add_to_existing" | "create_new"
+    target_folder: str = ""
+    folder_description: str = ""
 
     def __init__(self, **data):
         super().__init__(**data)

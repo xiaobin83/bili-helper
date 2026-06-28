@@ -11,20 +11,22 @@ import logging
 from typing import Any
 
 from watch_later_recommender.api_client import BiliAPIClient
-from watch_later_recommender.models import PrefsConfig, RecommendationResult, VideoItem
+from watch_later_recommender.models import Folder, PrefsConfig, RecommendationResult, VideoItem
 
 logger = logging.getLogger(__name__)
 
 MAX_LLM_CANDIDATES = 20
 TOVIEW_CAPACITY_LIMIT = 100
 TOVIEW_WARN_THRESHOLD = 95
+MAX_FOLDERS_IN_PROMPT = 30
 
 RECOMMENDATION_PROMPT_TEMPLATE = """你是一个B站视频推荐助手。请根据用户的偏好配置，从以下候选视频中精选{count}个推荐给用户。
 
 ## 用户偏好
 {preferences_text}
 
-## 推荐要求
+{folders_section}
+{topic_section}## 推荐要求
 1. {surprise_text}的视频应为"惊喜内容"（来自用户偏好分区之外的视频）
 2. 每个推荐请给出具体理由（结合用户偏好和视频内容）
 3. 拒绝广告/推广内容（rcmd_reason含"广告"、"推广"等关键词的不要选）
@@ -34,8 +36,12 @@ RECOMMENDATION_PROMPT_TEMPLATE = """你是一个B站视频推荐助手。请根�
 
 ## 输出格式
 请严格按以下JSON格式输出，不要包含其他文字：
-{{"bvids": ["BV...", "BV...", ...], "reasons": ["理由1", "理由2", ...], "surprise_count": N}}
+{output_format}
 务必输出{count}个bvid和{count}个理由，数量必须一致。"""
+
+TOVIEW_OUTPUT_FORMAT = """{{"bvids": ["BV...", "BV...", ...], "reasons": ["理由1", "理由2", ...], "surprise_count": N}}"""
+
+FAV_OUTPUT_FORMAT = """{{"bvids": ["BV...", "BV...", ...], "reasons": ["理由1", "理由2", ...], "surprise_count": N, "target_action": "add_to_existing"|"create_new", "target_folder": "收藏夹名称", "folder_description": "新建收藏夹的简介（仅create_new时需要）"}}"""
 
 
 async def fetch_candidates(
@@ -88,20 +94,36 @@ async def fetch_candidates(
     return deduped, counts
 
 
-def build_llm_prompt(candidates: list[VideoItem], prefs: PrefsConfig | None = None, count: int = 5) -> str:
-    """Phase 5: Build the LLM recommendation prompt.
+async def fetch_folders(client: BiliAPIClient, up_mid: int) -> list[Folder]:
+    """Fetch user's favorites folders sorted by media_count descending."""
+    folders = await client.list_fav_folders(up_mid)
+    folders.sort(key=lambda f: f.media_count, reverse=True)
+    return folders[:MAX_FOLDERS_IN_PROMPT]
+
+
+def build_llm_prompt(
+    candidates: list[VideoItem],
+    prefs: PrefsConfig | None = None,
+    count: int = 5,
+    target: str = "toview",
+    folders: list[Folder] | None = None,
+    topic: str = "",
+) -> str:
+    """Build the LLM recommendation prompt.
 
     Args:
-        candidates: Deduplicated, filtered candidate list (capped internally at MAX_LLM_CANDIDATES).
-        prefs: User preference config. When None, uses empty defaults.
+        candidates: Deduplicated, filtered candidate list.
+        prefs: User preference config.
         count: Number of videos to recommend (default 5, max 10).
+        target: "toview" or "fav".
+        folders: User's favorites folders (for target="fav").
+        topic: Optional topic keyword to amplify.
 
     Returns:
         Formatted prompt string ready for LLM consumption.
     """
     prefs = prefs or PrefsConfig()
 
-    # Build preferences text
     pref_lines = []
     if prefs.categories:
         for cat in prefs.categories:
@@ -119,6 +141,23 @@ def build_llm_prompt(candidates: list[VideoItem], prefs: PrefsConfig | None = No
         pref_lines.append("无特定偏好（从所有类型中精选）")
         surprise_text = "0%"
 
+    # Folders section (for fav target)
+    folders_section = ""
+    if target == "fav" and folders:
+        folder_lines = [f"- {f.title} ({f.media_count} 个视频)" for f in folders]
+        folders_section = (
+            "## 用户收藏夹\n"
+            "用户有以下收藏夹可供选择（名称 | 现有视频数）：\n"
+            + "\n".join(folder_lines)
+            + "\n\n"
+        )
+
+    # Topic section
+    topic_section = ""
+    if topic:
+        topic_section = f"## 本次推荐主题\n用户本次特别关注: \"{topic}\"\n请优先从候选视频中筛选与\"{topic}\"相关的内容。\n\n"
+
+    # Candidate list
     candidate_batch = candidates[:MAX_LLM_CANDIDATES]
     candidate_lines = []
     for i, v in enumerate(candidate_batch, 1):
@@ -131,11 +170,16 @@ def build_llm_prompt(candidates: list[VideoItem], prefs: PrefsConfig | None = No
             f" | 时长: {dur}"
         )
 
+    output_format = FAV_OUTPUT_FORMAT if target == "fav" else TOVIEW_OUTPUT_FORMAT
+
     return RECOMMENDATION_PROMPT_TEMPLATE.format(
         count=count,
         preferences_text="\n".join(pref_lines),
+        folders_section=folders_section,
+        topic_section=topic_section,
         surprise_text=surprise_text,
         candidates_text="\n".join(candidate_lines),
+        output_format=output_format,
     )
 
 
@@ -203,34 +247,104 @@ def fallback_selection(candidates: list[VideoItem], count: int = 5) -> Recommend
     )
 
 
+def determine_fav_target(
+    selected_bvids: list[str],
+    candidates: list[VideoItem],
+    folders: list[Folder],
+    prefs: PrefsConfig,
+) -> tuple[str, str, str]:
+    """Fallback: determine target folder from selected videos.
+
+    Stats partition distribution, matches against pref categories,
+    then looks for an existing folder whose name contains the
+    matching category name. Falls back to creating a new folder.
+
+    Returns:
+        Tuple of (action, folder_name, folder_description).
+        action is "add_to_existing" or "create_new".
+    """
+    lookup = {v.bvid: v for v in candidates}
+    selected = [lookup[b] for b in selected_bvids if b in lookup]
+
+    tid_counts: dict[int, int] = {}
+    for v in selected:
+        tid_counts[v.tid] = tid_counts.get(v.tid, 0) + 1
+
+    if not tid_counts:
+        return "add_to_existing", "默认收藏夹", ""
+
+    dominant_tid = max(tid_counts, key=tid_counts.get)  # type: ignore[arg-type]
+
+    match_name = ""
+    for cat in prefs.categories:
+        if dominant_tid in cat.tids:
+            match_name = cat.name
+            break
+
+    if not match_name:
+        match_name = selected[0].tname if selected else "默认收藏夹"
+
+    for f in folders:
+        if match_name in f.title or f.title in match_name:
+            return "add_to_existing", f.title, ""
+
+    new_name = f"{match_name}精选"
+    new_desc = f"由智能推荐自动创建的{match_name}精选收藏夹"
+    return "create_new", new_name, new_desc
+
+
 async def add_recommendations(
     client: BiliAPIClient,
     recommendations: list[dict[str, Any]],
-    toview_count: int,
+    target: str = "toview",
+    toview_count: int = 0,
+    target_folder: str = "",
+    target_action: str = "add_to_existing",
+    folders: list[Folder] | None = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    """Phase 6: Pre-check capacity and add recommendations to watch-later.
+    """Phase 6: Add recommendations to target (toview or favorites folder).
 
     Args:
         client: Authenticated BiliAPIClient.
         recommendations: List of dicts with bvid, aid, title, reason.
-        toview_count: Current number of items in watch-later.
+        target: "toview" or "fav".
+        toview_count: Current items in watch-later.
+        target_folder: Name of target folder (for target="fav").
+        target_action: "add_to_existing" or "create_new".
+        folders: Full folder list (for media_id lookup by name).
         dry_run: When True, skip actual API calls.
 
     Returns:
         Dict with keys: success, added, failed, message.
     """
     result: dict[str, Any] = {
-        "success": False,
-        "added": 0,
-        "failed": [],
-        "message": "",
+        "success": False, "added": 0, "failed": [], "message": "",
     }
 
     if dry_run:
         result["success"] = True
-        result["message"] = f"干跑模式完成，推荐了 {len(recommendations)} 个视频（未实际添加）"
+        msg = f"干跑模式完成，推荐了 {len(recommendations)} 个视频"
+        if target == "fav":
+            msg += f"，目标收藏夹: {target_folder}"
+        result["message"] = msg
         return result
+
+    if target == "toview":
+        return await _add_to_toview(client, recommendations, toview_count)
+    else:
+        return await _add_to_fav(client, recommendations, target_action, target_folder, folders)
+
+
+async def _add_to_toview(
+    client: BiliAPIClient,
+    recommendations: list[dict[str, Any]],
+    toview_count: int,
+) -> dict[str, Any]:
+    """Add recommendations to watch-later list."""
+    result: dict[str, Any] = {
+        "success": False, "added": 0, "failed": [], "message": "",
+    }
 
     if toview_count >= TOVIEW_WARN_THRESHOLD:
         result["message"] = (
@@ -257,5 +371,59 @@ async def add_recommendations(
         if result["failed"]:
             parts.append(f"，{len(result['failed'])} 个失败")
         result["message"] = "".join(parts)
+    return result
 
+
+async def _add_to_fav(
+    client: BiliAPIClient,
+    recommendations: list[dict[str, Any]],
+    target_action: str,
+    target_folder: str,
+    folders: list[Folder] | None,
+) -> dict[str, Any]:
+    """Add recommendations to a favorites folder (create new if needed)."""
+    result: dict[str, Any] = {
+        "success": False, "added": 0, "failed": [], "message": "",
+    }
+
+    media_id: int | None = None
+    if target_action == "create_new":
+        resp = await client.create_fav_folder(
+            name=target_folder,
+            intro=f"由智能推荐自动创建的收藏夹: {target_folder}",
+        )
+        if resp.get("code") != 0:
+            result["message"] = f"创建收藏夹失败: {resp.get('message', '')}"
+            return result
+        data = resp.get("data") or {}
+        media_id = data.get("media_id")
+        if not media_id:
+            result["message"] = "创建收藏夹后未获取到 media_id"
+            return result
+        result["message"] = f"已创建新收藏夹「{target_folder}」"
+    else:
+        if folders:
+            for f in folders:
+                if f.title == target_folder:
+                    media_id = f.id
+                    break
+        if not media_id:
+            result["message"] = f"未找到名为「{target_folder}」的收藏夹"
+            return result
+
+    for rec in recommendations:
+        resp = await client.add_to_fav_folder(rec["aid"], [media_id])
+        if resp.get("code") == 0:
+            rec["status"] = "added"
+            result["added"] += 1
+        else:
+            rec["status"] = "failed"
+            result["failed"].append(rec["bvid"])
+
+    result["success"] = result["added"] > 0
+    suffix = f"到收藏夹「{target_folder}」"
+    parts = [f"已将 {result['added']} 个视频添加{suffix}"]
+    if result["failed"]:
+        parts.append(f"，{len(result['failed'])} 个失败")
+    result["message"] = "".join(parts)
     return result
