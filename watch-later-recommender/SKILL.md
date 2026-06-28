@@ -46,13 +46,13 @@ uv run watch-later-recommender --target fav --topic "AI Agent" --count 5
 
 ```bash
 # 应用 LLM 结果（--target 不需要，工具自动从 JSON 推断）
-uv run watch-later-recommender --apply-llm-result /tmp/llm-output.txt
+uv run watch-later-recommender --apply-llm-result /tmp/llm-output.json
 
 # 如果想预览但不实际执行
-uv run watch-later-recommender --apply-llm-result /tmp/llm-output.txt --dry-run
+uv run watch-later-recommender --apply-llm-result /tmp/llm-output.json --dry-run
 
 # 覆盖 LLM 选择的收藏夹
-uv run watch-later-recommender --apply-llm-result /tmp/llm-output.txt --folder-name "感兴趣"
+uv run watch-later-recommender --apply-llm-result /tmp/llm-output.json --folder-name "感兴趣"
 ```
 
 > **关键**：阶段 2 不需要传 `--target`、`--topic` 或 `--count`——这些信息已编码在 LLM 返回的 JSON 中，工具自动推断。
@@ -99,10 +99,10 @@ prompt = extract_prompt_from_output(output)
 llm_response = task(category="ultrabrain", prompt=prompt)
 
 # Step 3: 保存 LLM 返回的完整文本（含总结和 JSON）
-write("/tmp/llm-output.txt", llm_response)
+write("/tmp/llm-output.json", llm_response)
 
 # Step 4: 应用结果（不需要 --target fav，工具自动推断）
-result = bash("uv run watch-later-recommender --apply-llm-result /tmp/llm-output.txt")
+result = bash("uv run watch-later-recommender --apply-llm-result /tmp/llm-output.json")
 
 # Step 5: 将人性化总结和添加结果展示给用户
 ```
@@ -138,16 +138,16 @@ uv run watch-later-recommender --target fav --topic "AI Agent" --count 5
 # === 阶段 2：应用 LLM 结果 ===
 
 # 从文件读取 LLM 结果并执行添加
-uv run watch-later-recommender --apply-llm-result llm-output.txt
+uv run watch-later-recommender --apply-llm-result llm-output.json
 
 # 干跑预览（不实际添加）
-uv run watch-later-recommender --apply-llm-result llm-output.txt --dry-run
+uv run watch-later-recommender --apply-llm-result llm-output.json --dry-run
 
 # 覆盖 LLM 选择的收藏夹
-uv run watch-later-recommender --apply-llm-result llm-output.txt --folder-name "感兴趣"
+uv run watch-later-recommender --apply-llm-result llm-output.json --folder-name "感兴趣"
 
 # 从 stdin 读取
-cat llm-output.txt | uv run watch-later-recommender --apply-llm-result -
+cat llm-output.json | uv run watch-later-recommender --apply-llm-result -
 
 # === 其他 ===
 

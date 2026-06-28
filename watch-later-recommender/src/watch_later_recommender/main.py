@@ -4,7 +4,7 @@ Two-phase workflow:
   Phase 1 — generate prompt:
       uv run watch-later-recommender --target fav
   Phase 2 — apply LLM result (no --target needed, inferred from LLM output):
-      uv run watch-later-recommender --apply-llm-result llm-output.txt
+      uv run watch-later-recommender --apply-llm-result llm-output.json
 
 Other options:
       uv run watch-later-recommender --target fav --topic "编程教程"
@@ -261,7 +261,7 @@ async def _main(argv: list[str] | None = None) -> int:
                   f"{' --folder-name ' + args.folder_name if args.folder_name else ''}"
                   f"{' --topic ' + args.topic if args.topic else ''}"
                   f" --count {args.count}"
-                  f" --apply-llm-result llm-output.txt")
+                  f" --apply-llm-result llm-output.json")
             return 0
 
         # --- With --apply-llm-result: parse, validate, execute ---
