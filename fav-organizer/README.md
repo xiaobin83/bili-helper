@@ -86,7 +86,7 @@ fav-organizer/
 │   ├── auth.py              # 鉴权（文件/环境变量/二维码登录）
 │   ├── scanner.py           # 失效内容扫描
 │   ├── dedup.py             # 重复内容检测
-│   ├── classifier_llm.py    # LLM 智能分类（唯一分类器）
+
 │   ├── planner.py           # 操作计划生成
 │   ├── executor.py          # 计划执行器
 │   ├── fav_api.py           # 收藏夹 API 客户端

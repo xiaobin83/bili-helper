@@ -57,7 +57,7 @@ uv run fav-organizer classify --folder "默认收藏夹" --dedup
 
 **Agent 的职责：** 为每个 `item_id` 填写 `category`（2-6 个中文字），例如 `"编程"`、`"游戏攻略"`。
 
-Agent 可以使用 `src/classifier_llm.py` 中的 `build_classification_prompt()` 为每个 item 生成中文分类提示词（包含标题、简介、已有文件夹），调用 LLM 决策后调用 `validate_category()` 验证结果。
+Agent 应为每个 item 生成中文分类提示词（从 `state.json` 的 `items_to_classify` 中获取标题、简介 `intro`、分区 `zone_tname`），调用 LLM 决策后验证结果为 2-6 个中文字，填入 `classification_result.json`。
 
 ### 阶段 3: plan — 生成整理计划
 

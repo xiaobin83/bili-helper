@@ -28,7 +28,6 @@ from bili_core.auth import check_expired, get_credentials
 from bili_core.auth import DEFAULT_AUTH_FILE
 from bili_core.http_client import BiliHTTPClient
 from bili_core.signing import sign_params
-from src.classifier_llm import classify_items
 from src.confirm import confirm_execution
 from src.dedup import detect_duplicates
 from src.fav_api import FavAPI
