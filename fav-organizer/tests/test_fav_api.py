@@ -29,8 +29,11 @@ class FakeHTTPClient:
     """Drop-in fake for BiliHTTPClient that returns pre-configured responses.
 
     Tracks every ``get`` / ``post`` call so tests can assert on parameters.
+    ``bili_jct`` is required by ``BaseBiliClient._has_auth`` (api_base.py:61);
+    ``post`` automatically injects ``csrf`` to match real ``BiliHTTPClient.post``.
     """
 
+    bili_jct: str = ""
     get_response: dict[Any, Any] = field(default_factory=dict)
     post_response: dict[Any, Any] = field(default_factory=dict)
     get_calls: list[dict] = field(default_factory=list)
@@ -41,7 +44,10 @@ class FakeHTTPClient:
         return self.get_response
 
     async def post(self, url: str, data: dict | None = None) -> dict:
-        self.post_calls.append({"url": url, "data": data or {}})
+        payload: dict = {"csrf": self.bili_jct}
+        if data:
+            payload.update(data)
+        self.post_calls.append({"url": url, "data": payload})
         return self.post_response
 
 
@@ -62,7 +68,7 @@ def fake_sign(params: dict) -> dict:
 
 @pytest.fixture
 def http_client() -> FakeHTTPClient:
-    return FakeHTTPClient()
+    return FakeHTTPClient(bili_jct="test_jct_123")
 
 
 @pytest.fixture

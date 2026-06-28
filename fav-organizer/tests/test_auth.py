@@ -24,7 +24,7 @@ from bili_core.auth import (  # noqa: E402
     get_credentials,
     check_expired,
     login_flow,
-    _AUTH_FILE,
+    _AUTH_FILE_DEFAULT,
     _NAV_URL,
     _GENERATE_URL,
     _POLL_URL,
@@ -135,7 +135,7 @@ class TestLoadFromFile:
     """Tests for _load_from_file()."""
 
     def test_file_not_found(self, tmp_path):
-        with patch("bili_core.auth._AUTH_FILE", tmp_path / "nonexistent.json"):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", tmp_path / "nonexistent.json"):
             result = _load_from_file()
             assert result is None
 
@@ -143,7 +143,7 @@ class TestLoadFromFile:
         auth_file = tmp_path / ".auth.json"
         data = {"sessdata": "sess123", "bili_jct": "jct456", "buvid3": "buv789", "mid": 10}
         auth_file.write_text(json.dumps(data))
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file):
             creds = _load_from_file()
             assert creds is not None
             assert creds.sessdata == "sess123"
@@ -155,7 +155,7 @@ class TestLoadFromFile:
         auth_file = tmp_path / ".auth.json"
         data = {"sessdata": "sess", "bili_jct": "jct"}
         auth_file.write_text(json.dumps(data))
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file):
             creds = _load_from_file()
             assert creds is not None
             assert creds.buvid3 == ""
@@ -164,14 +164,14 @@ class TestLoadFromFile:
     def test_invalid_json(self, tmp_path):
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text("not valid json")
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file):
             result = _load_from_file()
             assert result is None
 
     def test_missing_keys(self, tmp_path):
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text(json.dumps({"other": "value"}))
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file):
             result = _load_from_file()
             assert result is None
 
@@ -229,7 +229,8 @@ class TestGetCredentialsPriority:
         """When .auth.json exists, it should be used even if env vars are set."""
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text(json.dumps({"sessdata": "file_sess", "bili_jct": "file_jct"}))
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file), \
+             patch("bili_core.auth._AUTH_FILE_CANDIDATES", [auth_file]):
             with patch("bili_core.auth._load_from_env") as mock_env:
                 mock_env.return_value = None
                 creds = get_credentials()
@@ -238,7 +239,7 @@ class TestGetCredentialsPriority:
     def test_env_fallback(self, tmp_path):
         """When no file, env vars should be used."""
         no_file = tmp_path / ".auth.json"
-        with patch("bili_core.auth._AUTH_FILE", no_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", no_file):
             with patch("bili_core.auth._load_from_env") as mock_env:
                 mock_env.return_value = Credentials(sessdata="env_sess", bili_jct="env_jct")
                 creds = get_credentials()
@@ -247,7 +248,8 @@ class TestGetCredentialsPriority:
     def test_triggers_login_flow(self, tmp_path):
         """When neither file nor env, login_flow() should be called."""
         no_file = tmp_path / ".auth.json"
-        with patch("bili_core.auth._AUTH_FILE", no_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", no_file), \
+             patch("bili_core.auth._AUTH_FILE_CANDIDATES", [no_file]):
             with patch("bili_core.auth._load_from_env") as mock_env:
                 mock_env.return_value = None
                 with patch("bili_core.auth.login_flow") as mock_login:
@@ -286,9 +288,10 @@ class TestCheckExpired:
     def test_no_credentials_at_all(self, tmp_path):
         """When no creds available via file or env → return True."""
         no_file = tmp_path / ".auth.json"
-        with patch("bili_core.auth._AUTH_FILE", no_file):
-            with patch("bili_core.auth._load_from_env", return_value=None):
-                assert check_expired(None) is True
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", no_file), \
+             patch("bili_core.auth._AUTH_FILE_CANDIDATES", [no_file]), \
+             patch("bili_core.auth._load_from_env", return_value=None):
+            assert check_expired(None) is True
 
     def test_network_error_treats_as_valid(self):
         """Network errors during check → return False (assume valid)."""
@@ -303,7 +306,7 @@ class TestCheckExpired:
         auth_file = tmp_path / ".auth.json"
         auth_file.write_text(json.dumps({"sessdata": "file_sess", "bili_jct": "file_jct"}))
         resp = _make_resp(self.NAV_VALID)
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file):
             with patch("bili_core.auth.httpx.Client") as mock_client_class:
                 mock_client_class.return_value = _mock_client([resp])
                 assert check_expired(None) is False
@@ -335,7 +338,7 @@ class TestLoginFlow:
         auth_file = tmp_path / ".auth.json"
 
         # Mock _display_qr to avoid terminal output and browser opening
-        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file):
             # Mock httpx.Client
             with patch("bili_core.auth.httpx.Client") as mock_client_class:
                 # response 1: QR generate
@@ -367,7 +370,7 @@ class TestLoginFlow:
         """Poll returns 86101 (not scanned), then 0 (success)."""
         auth_file = tmp_path / ".auth.json"
 
-        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file), \
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file), \
              patch("bili_core.auth.time.sleep"):  # skip sleep
 
             with patch("bili_core.auth.httpx.Client") as mock_client_class:
@@ -393,7 +396,7 @@ class TestLoginFlow:
         """Poll returns 86038 (expired) → sys.exit(1)."""
         auth_file = tmp_path / ".auth.json"
 
-        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file), \
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file), \
              patch("bili_core.auth.time.sleep"):
 
             with patch("bili_core.auth.httpx.Client") as mock_client_class:
@@ -420,7 +423,7 @@ class TestLoginFlow:
         """Poll times out after 3 minutes (simulated)."""
         auth_file = tmp_path / ".auth.json"
 
-        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE", auth_file), \
+        with patch("bili_core.auth._display_qr"), patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file), \
              patch("bili_core.auth.time.sleep"):
             # Patch time.monotonic to simulate timeout
             with patch("bili_core.auth.time.monotonic", side_effect=[0, 999999]):
@@ -438,7 +441,7 @@ class TestLoginFlow:
         auth_file = tmp_path / ".auth.json"
         creds = Credentials(sessdata="sess", bili_jct="jct", buvid3="buv", mid=5)
 
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file):
             _save_credentials(creds)
 
         saved = json.loads(auth_file.read_text())
@@ -505,8 +508,9 @@ class TestIntegration:
         monkeypatch.setenv("FAV_SESSDATA", "env_sess")
         monkeypatch.setenv("FAV_BILI_JCT", "env_jct")
 
-        with patch("bili_core.auth._AUTH_FILE", auth_file):
-            creds = get_credentials()
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", auth_file), \
+             patch("bili_core.auth._AUTH_FILE_CANDIDATES", [auth_file]):
+            creds = get_credentials(auth_file=auth_file)
             assert creds.sessdata == "file"
             assert creds.mid == 1
 
@@ -518,7 +522,7 @@ class TestIntegration:
         monkeypatch.setenv("FAV_BUVID3", "env_buv")
         monkeypatch.setenv("FAV_MID", "42")
 
-        with patch("bili_core.auth._AUTH_FILE", no_file):
+        with patch("bili_core.auth._AUTH_FILE_DEFAULT", no_file):
             creds = get_credentials()
             assert creds.sessdata == "env_sess"
             assert creds.bili_jct == "env_jct"

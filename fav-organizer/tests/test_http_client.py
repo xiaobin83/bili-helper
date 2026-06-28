@@ -266,12 +266,12 @@ async def test_request_interval_no_sleep_when_enough_time() -> None:
 async def test_async_context_manager_closes_client() -> None:
     """__aexit__ calls close() on the underlying httpx client."""
     client = _new_client()
-    client._session.close = AsyncMock()
+    client._session.aclose = AsyncMock()
 
     async with client:
         pass
 
-    client._session.close.assert_awaited_once()
+    client._session.aclose.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
