@@ -300,10 +300,19 @@ def parse_llm_result(
         )
         return None
 
+    target_action = result.target_action
+    target_folder = result.target_folder
+    if target_action not in ("toview", "add_to_existing", "create_new"):
+        target_action = "toview"
+        target_folder = ""
+
     return RecommendationResult(
         bvids=valid_bvids[:count],
         reasons=result.reasons[:count],
         surprise_count=result.surprise_count,
+        target_action=target_action,
+        target_folder=target_folder,
+        folder_description=result.folder_description or "",
     )
 
 
