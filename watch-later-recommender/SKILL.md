@@ -38,13 +38,13 @@ uv run watch-later-recommender --target fav --topic "AI Agent" --count 5
 
 ### 阶段 2：调用 LLM 并应用结果
 
-1. **Agent 读取 OpenViking 用户记忆**，将相关偏好/事件/实体追加到 prompt 末尾作为额外上下文。
+1. **Agent 读取用户偏好记忆**，将已知的用户兴趣、历史操作和偏好追加到 prompt 末尾作为额外上下文。
    ```text
-   ## 用户记忆（Agent 从 OpenViking 查询）
-   - 用户之前曾要求将推荐视频放入「AI Agent」收藏夹
+   ## 用户偏好记忆（Agent 从历史交互中获取）
+   - 用户曾要求将推荐视频放入「AI Agent」收藏夹
    - 用户对 AI Agent 开发相关内容感兴趣
    ```
-   Agent 自行决定搜索哪些记忆关键词（如当前 topic、用户偏好分类名），不限格式和数量。
+   Agent 根据自身可用的记忆/上下文系统查询偏好信息（如 OpenViking 记忆、历史会话、偏好文件等），不限格式和数量。
 2. **Agent 将增强后的完整 prompt 发送给 LLM**（通过 `task()` 或直接调用），不添加其他额外指令。
 3. LLM 返回的结果包含两部分：
    - **人性化推荐总结**（文本）：给用户阅读
@@ -102,9 +102,9 @@ LLM prompt 会指导 LLM 输出如下格式：
 output = bash("uv run watch-later-recommender --target fav --topic 'AI Agent' --count 5")
 prompt = extract_prompt_from_output(output)
 
-# Step 2: 查询 OpenViking 记忆，追加到 prompt
-memories = memsearch(query="AI Agent 开发 偏好 收藏夹", target_uri="viking://user/opencode/memories/")
-memory_section = "## 用户记忆\n" + "\n".join(f"- {m.summary}" for m in memories)
+# Step 2: 读取用户偏好记忆（如 OpenViking 记忆、历史会话等）
+memories = get_user_preference_memories()  # Agent 根据平台读取记忆
+memory_section = "## 用户偏好记忆\n" + "\n".join(f"- {m}" for m in memories)
 augmented_prompt = prompt + "\n\n" + memory_section
 
 # Step 3: 将增强后的 prompt 发送给 LLM
