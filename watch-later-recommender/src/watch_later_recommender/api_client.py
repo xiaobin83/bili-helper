@@ -13,7 +13,9 @@ import re
 from typing import Any
 
 from bili_core.auth import Credentials
+from bili_core.fav import FavClient
 from bili_core.http_client import BiliHTTPClient
+from bili_core.search import SearchClient
 from bili_core.signing import sign_params
 
 from watch_later_recommender.models import Folder, VideoItem
@@ -44,6 +46,9 @@ class BiliAPIClient:
             buvid3=buvid3,
             min_interval=2.0,
         )
+        # Delegate fav/search to bili-core shared clients
+        self._fav = FavClient(http_client=self._client, signing=sign_params)
+        self._search = SearchClient(http_client=self._client, signing=sign_params)
 
     async def close(self) -> None:
         await self._client.close()
@@ -193,16 +198,6 @@ class BiliAPIClient:
             return {"code": -1, "message": str(e)}
 
     # ------------------------------------------------------------------
-    # Signed GET helper
-    # ------------------------------------------------------------------
-
-    async def _signed_get(self, path: str, params: dict | None = None) -> dict:
-        """GET with Wbi signature. Requires auth."""
-        raw_params = dict(params or {})
-        signed = sign_params(raw_params)
-        return await self._client.get(f"{BASE_URL}{path}", params=signed)
-
-    # ------------------------------------------------------------------
     # User info
     # ------------------------------------------------------------------
 
@@ -223,30 +218,15 @@ class BiliAPIClient:
     # ------------------------------------------------------------------
 
     async def list_fav_folders(self, up_mid: int) -> list[Folder]:
-        """Fetch all favorites folders for the user. Requires auth + Wbi.
+        """Fetch all favorites folders for the user. Requires auth.
 
-        Args:
-            up_mid: User's numeric mid.
-
-        Returns:
-            List of Folder objects. Empty list on error.
+        Delegates to ``bili_core.fav.FavClient.list_folders``.
         """
         if not self._has_auth:
             logger.info("list_fav_folders: skipped (no auth)")
             return []
-
         try:
-            raw = await self._signed_get(
-                "/x/v3/fav/folder/created/list-all",
-                {"up_mid": up_mid},
-            )
-            if raw.get("code") != 0:
-                logger.warning("list_fav_folders: code=%s", raw.get("code"))
-                return []
-            data = raw.get("data")
-            if not data or not isinstance(data, dict):
-                return []
-            folder_dicts = data.get("list", []) or []
+            folder_dicts = await self._fav.list_folders(up_mid)
             return [Folder(**f) for f in folder_dicts]
         except Exception as e:
             logger.warning("list_fav_folders failed: %s", e)
@@ -255,89 +235,37 @@ class BiliAPIClient:
     async def add_to_fav_folder(self, aid: int, add_media_ids: list[int]) -> dict:
         """Add a video to one or more favorites folders. Requires auth.
 
-        Args:
-            aid: Video avid.
-            add_media_ids: Target folder media_id(s).
-
-        Returns:
-            Dict with code and message.
+        Delegates to ``bili_core.fav.FavClient.add_video``.
         """
         if not self._has_auth:
             return {"code": -1, "message": "未登录，无法添加到收藏夹"}
-
-        try:
-            raw = await self._client.post(
-                f"{BASE_URL}/x/v3/fav/resource/add",
-                data={
-                    "resources": f"{aid}:2",  # type=2 for video
-                    "add_media_ids": ",".join(str(m) for m in add_media_ids),
-                },
-            )
-            return {"code": raw.get("code", -1), "message": raw.get("message", "")}
-        except Exception as e:
-            logger.warning("add_to_fav_folder failed: %s", e)
-            return {"code": -1, "message": str(e)}
+        return await self._fav.add_video(aid, add_media_ids)
 
     async def create_fav_folder(self, name: str, intro: str = "", privacy: int = 0) -> dict:
         """Create a new favorites folder. Requires auth.
 
-        Args:
-            name: Folder title.
-            intro: Optional description.
-            privacy: 0=public, 1=private.
-
-        Returns:
-            Dict with code, message, data (may contain media_id).
+        Delegates to ``bili_core.fav.FavClient.create_folder``.
         """
         if not self._has_auth:
             return {"code": -1, "message": "未登录，无法创建收藏夹"}
-
-        try:
-            raw = await self._client.post(
-                f"{BASE_URL}/x/v3/fav/folder/add",
-                data={"title": name, "intro": intro, "privacy": privacy},
-            )
-            return {
-                "code": raw.get("code", -1),
-                "message": raw.get("message", ""),
-                "data": raw.get("data") or {},
-            }
-        except Exception as e:
-            logger.warning("create_fav_folder failed: %s", e)
-            return {"code": -1, "message": str(e)}
+        return await self._fav.create_folder(name, intro, privacy)
 
     # ------------------------------------------------------------------
     # Source 4: Search (搜索)
     # ------------------------------------------------------------------
 
     async def search_videos(self, keyword: str, page: int = 1, order: str = "totalrank") -> list[VideoItem]:
-        """Search videos by keyword. Requires auth (Wbi signed).
+        """Search videos by keyword. Requires auth.
 
-        Returns up to 20 video results per page.
-        Returns [] on error or no auth.
+        Delegates to ``bili_core.search.SearchClient.search_videos``.
+        Returns VideoItem objects parsed from raw API results.
         """
         if not self._has_auth:
             logger.info("search_videos: skipped (no auth)")
             return []
         try:
-            raw = await self._signed_get("/x/web-interface/wbi/search/type", {
-                "search_type": "video",
-                "keyword": keyword,
-                "order": order,
-                "duration": 0,
-                "tids": 0,
-                "page": page,
-            })
-            if raw.get("code") != 0:
-                logger.warning("search_videos: code=%s", raw.get("code"))
-                return []
-            data = raw.get("data") or {}
-            result = data.get("result") or []
-            items = []
-            for item in result:
-                if item.get("type") == "video":
-                    items.append(self._parse_search_item(item))
-            return items
+            items = await self._search.search_videos(keyword, page, order)
+            return [self._parse_search_item(item) for item in items]
         except Exception as e:
             logger.warning("search_videos failed: %s", e)
             return []
