@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 import time
 from pathlib import Path
@@ -10,6 +11,8 @@ from pathlib import Path
 import httpx
 
 from bili_core.errors import AuthError, CSRFError, RateLimitError
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_HEADERS = {
     "User-Agent": (
@@ -174,7 +177,17 @@ class BiliHTTPClient:
                     f"请求过于频繁，已达到最大重试次数 (HTTP {resp.status_code})",
                 )
 
-            data: dict = resp.json()
+            try:
+                data: dict = resp.json()
+            except Exception:
+                # Non-JSON response — log diagnostic info and return error
+                logger.warning(
+                    "non-JSON response: HTTP %s %s | body=%s",
+                    resp.status_code, resp.reason_phrase,
+                    resp.text[:300],
+                )
+                return {"code": -1, "message": f"非JSON响应: HTTP {resp.status_code}"}
+
             code = data.get("code", 0)
 
             if code == -101:

@@ -222,7 +222,7 @@ class FavClient(BaseBiliClient):
     async def add_video(self, aid: int, media_ids: list[int]) -> dict:
         """Add a video to one or more favorites folders.
 
-        Calls ``POST /x/v3/fav/resource/add`` (CSRF-authenticated).
+        Calls ``POST /medialist/gateway/coll/resource/deal`` (CSRF-authenticated).
 
         Parameters
         ----------
@@ -237,10 +237,12 @@ class FavClient(BaseBiliClient):
             return {"code": -1, "message": "未登录，无法添加到收藏夹"}
         try:
             raw = await self._post(
-                "/x/v3/fav/resource/add",
+                "/medialist/gateway/coll/resource/deal",
                 {
-                    "resources": f"{aid}:2",  # type=2 for video
+                    "rid": aid,
+                    "type": 2,  # 2 = video
                     "add_media_ids": ",".join(str(m) for m in media_ids),
+                    "del_media_ids": "",
                 },
             )
             return {"code": raw.get("code", -1), "message": raw.get("message", "")}

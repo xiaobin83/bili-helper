@@ -69,6 +69,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="推荐目标: toview（稍后再看，默认）| fav（收藏夹）",
     )
     parser.add_argument(
+        "--folder-name",
+        type=str,
+        default=None,
+        help="目标收藏夹名称（仅 --target fav 时有效），不指定则由 LLM 或偏好自动匹配",
+    )
+    parser.add_argument(
         "--topic",
         type=str,
         default=None,
@@ -207,9 +213,14 @@ async def _main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             if args.target == "fav":
                 result = fallback_selection(candidates, count=args.count)
-                action, folder_name, folder_desc = determine_fav_target(
-                    result.bvids, candidates, folders, prefs,
-                )
+                if args.folder_name:
+                    folder_name = args.folder_name
+                    exists = any(f.title == folder_name for f in folders)
+                    action = "add_to_existing" if exists else "create_new"
+                else:
+                    action, folder_name, folder_desc = determine_fav_target(
+                        result.bvids, candidates, folders, prefs,
+                    )
                 _print_results(
                     candidates, counts, result.bvids, result.reasons,
                     target=args.target, target_folder=folder_name,
@@ -262,9 +273,18 @@ async def _main(argv: list[str] | None = None) -> int:
         else:
             # fav target — fallback selection, determine folder, add to fav
             result = fallback_selection(candidates, count=args.count)
-            action, folder_name, folder_desc = determine_fav_target(
-                result.bvids, candidates, folders, prefs,
-            )
+
+            # Use --folder-name when specified, otherwise auto-determine
+            if args.folder_name:
+                folder_name = args.folder_name
+                folder_desc = ""
+                # Check if folder exists; if not, create it
+                exists = any(f.title == folder_name for f in folders)
+                action = "add_to_existing" if exists else "create_new"
+            else:
+                action, folder_name, folder_desc = determine_fav_target(
+                    result.bvids, candidates, folders, prefs,
+                )
 
             rec_dicts = [
                 {"bvid": bvid, "aid": next((v.aid for v in candidates if v.bvid == bvid), 0), "title": "", "reason": reason}

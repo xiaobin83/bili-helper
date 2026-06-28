@@ -1,11 +1,16 @@
 ---
 name: watch-later-recommender
-description: B站（Bilibili）视频智能推荐工具。从热门榜、排行榜和个性化推荐中精选视频，基于用户偏好自动加入稍后再看列表或收藏夹。当用户提到稍后再看推荐、帮我推荐视频、智能推荐稍后再看、B站视频推荐、找值得看的视频、watch later推荐、智能推荐、推荐几个视频时触发。
+description: B站（Bilibili）视频智能推荐工具。从热门榜、排行榜和个性化推荐中精选视频，基于用户偏好自动加入稍后再看列表或收藏夹。当用户提到稍后再看推荐、帮我推荐视频、收藏夹推荐、B站视频推荐、找值得看的视频、watch later推荐、智能推荐、推荐几个视频、放入收藏夹时触发。
 ---
 
 # watch-later-recommender — B站 智能推荐
 
-从全站热门、分区排行榜和个性化推荐中获取候选视频，依据用户偏好配置文件精选视频，自动添加到稍后再看列表或收藏夹。支持 LLM 智能推荐，也支持无 LLM 时的按播放量降序回退。`--target fav` 将推荐结果存入收藏夹（LLM 或回退逻辑自动选择/创建文件夹），`--topic` 使用 B站 搜索获取相关视频作为候选池替代热门/排行源。
+从全站热门、分区排行榜和个性化推荐中获取候选视频，依据用户偏好配置文件精选视频，自动添加到稍后再看列表或收藏夹。支持 LLM 智能推荐（分析内容匹配度 + 用户偏好），也支持无 LLM 时的按播放量降序回退。
+
+**核心能力**：
+- `--target toview`（默认）：推荐到稍后再看列表
+- `--target fav`：推荐到收藏夹（LLM 或回退逻辑自动选择/新建收藏夹）
+- `--topic "关键词"`：用 B站 搜索替代热门/排行源，获取主题相关视频作为候选池
 
 ## 使用方式
 
@@ -41,8 +46,14 @@ uv run watch-later-recommender --target fav --topic "编程教程"
 # 干跑模式：只看推荐结果，不实际添加
 uv run watch-later-recommender --dry-run
 
+# 干跑模式：推荐到收藏夹（不实际添加）
+uv run watch-later-recommender --dry-run --target fav
+
 # 干跑模式预览搜索推荐
 uv run watch-later-recommender --dry-run --topic "健身"
+
+# 干跑模式预览搜索推荐到收藏夹
+uv run watch-later-recommender --dry-run --target fav --topic "机器学习"
 
 # 首次使用：生成偏好配置文件模板
 uv run watch-later-recommender --init-prefs
@@ -58,7 +69,7 @@ uv run watch-later-recommender --count 3
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `--dry-run` | `flag` | 只推荐不实际添加到稍后再看 |
+| `--dry-run` | `flag` | 只推荐不实际添加（到稍后再看或收藏夹） |
 | `--init-prefs` | `flag` | 初始化偏好配置文件（创建模板） |
 | `--prefs` | `str` | 自定义偏好配置文件路径（默认 `~/.bili-helper/.watch-later-prefs.yaml`） |
 | `--count` | `int` | 推荐视频数量（默认 5，最大 10） |
@@ -149,9 +160,31 @@ uv run watch-later-recommender
 | Phase 3 | 首页个性化推荐 | `x/web-interface/index/top/rcmd` | 获取个性化推荐，需要登录 |
 | Phase 4 | 去重+过滤 | — | 去重、过滤广告、排除已在稍后再看的视频，剩余最多 20 个候选。`--target fav` 时跳过与已收藏视频的去重 |
 | Phase 5 | LLM 精选 | — | 根据用户偏好从候选池中精选，生成推荐理由。`--target fav` 时 prompt 附带收藏夹列表和主题信息 |
-| Phase 6 | 添加到目标 | `x/v2/history/toview/add` / `x/v3/fav/resource/deal` | `--target toview`：添加到稍后再看，检查容量上限（100 个）。`--target fav`：添加到收藏夹，自动选择或新建文件夹 |
+| Phase 6 | 添加到目标 | `x/v2/history/toview/add` / `x/v3/fav/resource/add` | `--target toview`：添加到稍后再看，检查容量上限（100 个）。`--target fav`：添加到收藏夹，自动选择或新建文件夹 |
 
-### 场景 2：首次使用（初始化偏好配置）
+### 场景 2：推荐到收藏夹
+
+```bash
+# 推荐 5 个视频到收藏夹（LLM 自动选择或新建收藏夹）
+uv run watch-later-recommender --target fav
+
+# 推荐到已有名称匹配的收藏夹（如名称包含"技术"）
+uv run watch-later-recommender --target fav --topic "Rust编程"
+
+# 指定推荐数量并预览（不实际添加）
+uv run watch-later-recommender --target fav --count 3 --dry-run
+
+# 按主题搜索并推荐到收藏夹（替代热门/排行候选源）
+uv run watch-later-recommender --target fav --topic "AI Agent"
+```
+
+推荐到收藏夹时，LLM prompt 会附带用户现有的收藏夹列表，LLM 可自行决定：
+- 添加到已有收藏夹（`target_action: "add_to_existing"`）
+- 新建收藏夹（`target_action: "create_new"`）
+
+若 LLM 不可用（CLI 回退模式），根据推荐视频的分区分布自动匹配偏好分类名称 → 查找名称匹配的已有收藏夹 → 无匹配则以分类名+"精选"新建。
+
+### 场景 3：首次使用（初始化偏好配置）
 
 ```bash
 # 生成偏好配置模板
@@ -160,7 +193,7 @@ uv run watch-later-recommender --init-prefs
 
 生成 `~/.bili-helper/.watch-later-prefs.yaml` 后，编辑该文件设置你的内容偏好。
 
-### 场景 3：游客模式（无登录，仅推荐不添加）
+### 场景 4：游客模式（无登录，仅推荐不添加）
 
 不设置任何 Cookie 环境变量，或登录失败时自动降级：
 
@@ -171,7 +204,9 @@ uv run watch-later-recommender --dry-run
 游客模式下：
 - 跳过个性化推荐源（Phase 3）
 - 跳过稍后再看去重（Phase 4 的已存在过滤）
-- 不执行添加（Phase 6）
+- 不执行添加（Phase 6，包括稍后再看和收藏夹添加）
+- 无法获取收藏夹列表（`--target fav` 时无收藏夹上下文）
+- 搜索候选（`--topic`）不可用，回退为热门/排行源模式
 
 ### LLM 推荐流程
 
@@ -204,25 +239,40 @@ LLM 输出通过 `parse_llm_result()` 解析和校验：
 | 2 | 请求频率过高（限流） | 等待片刻后重试 |
 | 3 | 未找到偏好配置文件 | 先运行 `--init-prefs` 生成模板 |
 | 4 | 稍后再看列表空间不足（≥95/100，仅 `--target toview`） | 先清理稍后再看列表再重试 |
+| 5 | 收藏夹操作失败（创建文件夹失败、未找到匹配文件夹，仅 `--target fav`） | 检查凭证有效性，或手动创建收藏夹后重试 |
 
 | B站 API 错误码 | 含义 | 处理建议 |
 |----------------|------|---------|
 | -101 | 登录已过期 | 重新获取 SESSDATA |
 | -111 | CSRF 校验失败 | 更新 bili_jct |
-| 90001 | 稍后再看列表已满 | 清理稍后再看后重试 |
+| 90001 | 稍后再看列表已满（仅 `--target toview`） | 清理稍后再看后重试 |
 | 90003 | 视频已删除 | 忽略该视频，继续添加其他 |
 | HTTP 412/429 | 请求频率过高 | 等待后重试（内置指数退避，最多 3 次） |
 | 网络错误 | 连接失败 | 自动重试 3 次，仍失败则报错 |
 
+### 收藏夹操作错误处理
+
+`--target fav` 时，操作失败的可能原因：
+
+| 错误场景 | 表现 | 解决办法 |
+|----------|------|---------|
+| 未登录 | 跳过添加操作，仅输出推荐结果 | 先配置 B站 Cookie |
+| 收藏夹名不匹配（新增模式） | 回退创建「{分类名}精选」 | 自动新建，无需干预 |
+| 收藏夹名不匹配（add_to_existing） | 查找同名文件夹失败，报错退出 | 检查收藏夹名称是否准确 |
+| 创建收藏夹失败 | API 返回非 0 code | 检查收藏夹数量上限（B站限制约 100 个） |
+| 添加到收藏夹失败 | 单个视频添加返回错误 | 跳过该视频，继续添加其余视频 |
+
 ## 限制
 
-- 稍后再看列表最大容量 100 个（B站 API 限制），超过 95 个时不允许新增
+- 稍后再看列表最大容量 100 个（B站 API 限制），超过 95 个时不允许新增（仅 `--target toview`）
 - 单次最多推荐 10 个视频（B站 API 限制）
 - 传递至 LLM 的候选池上限为 20 个（去重过滤后按播放量排序取前 20）
 - 数据源请求间隔为 2 秒（内置限流，避免触发风控）
 - 个性化推荐（`index/top/rcmd`）需要登录，无需登录时跳过该源
 - 仅支持视频类型，不处理专栏、直播等其他内容
 - LLM 推荐为建议性质，Agent 可使用 fallback 策略（按播放量排序）确保可靠性
+- `--target fav` 时收藏夹写入操作需要登录态，未登录时仅输出推荐结果
+- 搜索候选（`--topic`）需要登录态，未登录时回退为热门/排行源模式
 
 ## 依赖安装
 

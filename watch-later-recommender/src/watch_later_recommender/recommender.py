@@ -448,7 +448,8 @@ async def _add_to_fav(
             result["message"] = f"创建收藏夹失败: {resp.get('message', '')}"
             return result
         data = resp.get("data") or {}
-        media_id = data.get("media_id")
+        # B站 API 返回的字段是 id（即 media_id），不是 media_id
+        media_id = data.get("id")
         if not media_id:
             result["message"] = "创建收藏夹后未获取到 media_id"
             return result
