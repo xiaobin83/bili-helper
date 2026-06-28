@@ -90,6 +90,36 @@ uv run video-analyzer --bvid BV1GJ411x7 --no-pbp --no-summary --no-playurl --no-
 uv run video-analyzer --bvid BV1GJ411x7 --output ./report.md
 ```
 
+## LLM 介入时机
+
+项目中有两个工具涉及 LLM 决策，但 LLM 介入的方式不同：
+
+### watch-later-recommender：一次性 batch 决策
+
+```
+工具采集数据 → 工具生成 prompt → Agent 调用 LLM → 工具执行添加
+     ── 阶段 1 ──→      ── （Agent 负责） ──→     ── --apply-llm-result ──→
+```
+
+- **LLM 调用次数**：1 次（所有候选视频合并到一个 prompt）
+- **Agent 职责**：读取 stdout 的 prompt → 发送给 LLM → 保存返回结果 → 传入 `--apply-llm-result`
+- **LLM 输出**：人性化推荐总结 + ` ```json ` 结构化数据（bvids、reasons、target_action）
+- **可迭代性**：不可迭代。想换结果需重新生成 prompt 再调 LLM
+- **工具角色**：数据采集容器 + prompt 生成器 + 执行器
+
+### fav-organizer：逐条迭代决策
+
+```
+工具采集数据 → Agent 逐条调 LLM → 工具生成计划 → 工具执行整理
+  classify ──→   分类结果.json   ──→   plan   ──→  execute
+```
+
+- **LLM 调用次数**：每条收藏内容 1 次（每个视频单独分类）
+- **Agent 职责**：读取 `state.json` 获取待分类条目 → 逐条构建 prompt → 调 LLM → 验证结果 → 写入 `classification_result.json`
+- **LLM 输出**：2-6 个中文字的分类名称
+- **可迭代性**：可迭代。Agent 可反复修改 `classification_result.json` 中的分类结果，每改一次都能重新 `plan` 预览效果
+- **工具角色**：数据采集容器 + LLM 辅助函数（`build_classification_prompt`/`validate_category`）+ 计划生成器 + 执行器
+
 ### 鉴权
 
 所有工具共享 B站 凭证，使用统一的环境变量前缀：
