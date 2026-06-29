@@ -37,42 +37,47 @@ _CLASSIFICATION_PROMPT = """你是 B站 at-orchestrator 消息分类助手。
 - unknown: 无法匹配以上任何技能
 
 Few-shot 示例：
-1. 消息: "分析这个视频BV1xx"
-   输出: {{"skill_name": "video-analyzer", "params": {{"bvid": "BV1xx"}}, "confidence": 0.95, "reason": "用户明确要求分析视频"}}
+1. 消息(id=1001, source=at): "分析这个视频BV1xx"
+   输出: {{"msg_id": 1001, "skill_name": "video-analyzer", "params": {{"bvid": "BV1xx"}}, "confidence": 0.95, "reason": "用户明确要求分析视频"}}
 
-2. 消息: "今天天气不错"
-   输出: {{"skill_name": "unknown", "params": {{}}, "confidence": 0.95, "reason": "与B站功能无关的闲聊消息"}}
+2. 消息(id=1002, source=reply): "今天天气不错"
+   输出: {{"msg_id": 1002, "skill_name": "unknown", "params": {{}}, "confidence": 0.95, "reason": "与B站功能无关的闲聊消息"}}
 
 现在请分类以下消息：
-<message>{content}</message>
+<message id={msg_id} source={source}>{content}</message>
 
 业务上下文：{business_context}
 
 请只输出 JSON，不要额外文字。
 使用以下格式：
-{{"skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}"""
+{{"msg_id": ..., "skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}"""
 
 
 def build_classification_prompt(task_dict: dict[str, Any]) -> str:
     """Build an LLM classification prompt from a task dictionary.
 
     Args:
-        task_dict: Dict with ``content`` (user message text) and
-                   ``business_id`` (int context identifier).
+        task_dict: Dict with ``msg_id`` (int), ``source`` (str),
+                   ``content`` (user message text) and ``business_id``
+                   (int context identifier).
 
     Returns:
         Formatted prompt string ready for LLM consumption.
 
     The prompt includes skill descriptions, 2 few-shot examples,
-    user content wrapped in ``<message>...</message>`` tags for injection
-    protection, and business context.
+    user content wrapped in ``<message id=.. source=..>...</message>``
+    tags for injection protection, and business context.
     """
+    msg_id = task_dict.get("msg_id", 0)
+    source = task_dict.get("source", "unknown")
     content = task_dict.get("content", "")
     business_id = task_dict.get("business_id", 0)
 
     business_context = _BUSINESS_CONTEXT_MAP.get(business_id, f"未知业务 (ID: {business_id})")
 
     return _CLASSIFICATION_PROMPT.format(
+        msg_id=msg_id,
+        source=source,
         content=content,
         business_context=business_context,
     )
@@ -123,8 +128,9 @@ def _extract_json_text(text: str) -> str | None:
 def _validate_classification(data: dict[str, Any]) -> dict[str, Any] | None:
     """Validate and normalize a parsed classification dict.
 
-    Returns a clean dict with only the 4 expected keys, or ``None`` if
-    the data fails structural or value validation.
+    Returns a clean dict with the 4 required keys (skill_name, params,
+    confidence, reason) plus optional ``msg_id`` when present, or
+    ``None`` if the data fails structural or value validation.
     """
     # Must be a dict
     if not isinstance(data, dict):
@@ -159,12 +165,19 @@ def _validate_classification(data: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(reason, str):
         return None
 
-    return {
+    result: dict[str, Any] = {
         "skill_name": skill_name,
         "params": params,
         "confidence": confidence,
         "reason": reason,
     }
+
+    # Preserve msg_id when present (for mapping back to the task)
+    msg_id = data.get("msg_id")
+    if msg_id is not None:
+        result["msg_id"] = msg_id
+
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────

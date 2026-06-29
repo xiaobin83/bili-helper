@@ -18,26 +18,29 @@ class TestBuildClassificationPrompt:
     """Prompt builder — returns string with required structural elements."""
 
     def test_returns_string(self) -> None:
-        task = {"content": "分析这个视频BV1xx", "business_id": 1}
+        task = {"msg_id": 1001, "source": "at", "content": "分析这个视频BV1xx", "business_id": 1}
         result = build_classification_prompt(task)
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_wraps_content_in_message_tags(self) -> None:
+    def test_wraps_content_in_message_tags_with_meta(self) -> None:
         content = "帮我推荐几个视频"
-        task = {"content": content, "business_id": 1}
+        task = {"msg_id": 2002, "source": "reply", "content": content, "business_id": 1}
         prompt = build_classification_prompt(task)
-        assert "<message>帮我推荐几个视频</message>" in prompt
+        assert "id=2002" in prompt
+        assert "source=reply" in prompt
+        assert "<message" in prompt
+        assert f">{content}</message>" in prompt
 
     def test_contains_all_skill_names(self) -> None:
-        task = {"content": "test", "business_id": 1}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 1}
         prompt = build_classification_prompt(task)
         assert "video-analyzer" in prompt
         assert "watch-later-recommender" in prompt
         assert "unknown" in prompt
 
     def test_contains_at_least_2_few_shot_examples(self) -> None:
-        task = {"content": "test", "business_id": 1}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 1}
         prompt = build_classification_prompt(task)
         # Each few-shot example should contain a skill_name assignment
         occurrences = prompt.count('"skill_name"')
@@ -45,70 +48,71 @@ class TestBuildClassificationPrompt:
         assert occurrences >= 2, f"Expected >=2 few-shot examples, found {occurrences} 'skill_name' occurrences"
 
     def test_contains_business_context_section(self) -> None:
-        task = {"content": "test", "business_id": 1}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 1}
         prompt = build_classification_prompt(task)
         assert "业务上下文" in prompt or "上下文" in prompt
 
     def test_business_context_for_dynamic_reply(self) -> None:
-        task = {"content": "test", "business_id": 11}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 11}
         prompt = build_classification_prompt(task)
         assert "动态回复" in prompt
 
     def test_business_context_for_dynamic(self) -> None:
-        task = {"content": "test", "business_id": 17}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 17}
         prompt = build_classification_prompt(task)
         assert "动态" in prompt
 
     def test_business_context_for_comment(self) -> None:
-        task = {"content": "test", "business_id": 1}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 1}
         prompt = build_classification_prompt(task)
         assert "视频评论" in prompt
 
     def test_business_context_for_unknown_id(self) -> None:
         """Unknown business_id should still produce a valid prompt."""
-        task = {"content": "test", "business_id": 999}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 999}
         prompt = build_classification_prompt(task)
         assert isinstance(prompt, str)
         assert len(prompt) > 0
 
     def test_prompt_instructs_json_only_output(self) -> None:
-        task = {"content": "test", "business_id": 1}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 1}
         prompt = build_classification_prompt(task)
         # Should instruct to output only JSON, no extra text
         assert "JSON" in prompt
         assert "不要额外文字" in prompt or "只输出" in prompt or "only" in prompt.lower()
 
     def test_prompt_instructs_output_format(self) -> None:
-        task = {"content": "test", "business_id": 1}
+        task = {"msg_id": 1, "source": "at", "content": "test", "business_id": 1}
         prompt = build_classification_prompt(task)
         assert "skill_name" in prompt
         assert "params" in prompt
         assert "confidence" in prompt
         assert "reason" in prompt
+        # Output format should also mention msg_id
+        assert "msg_id" in prompt
 
     def test_content_with_special_characters(self) -> None:
-        task = {"content": "分析 BV1xx <script>alert(1)</script> & \"quotes\"", "business_id": 1}
+        task = {"msg_id": 1, "source": "at", "content": "分析 BV1xx <script>alert(1)</script> & \"quotes\"", "business_id": 1}
         prompt = build_classification_prompt(task)
         assert "BV1xx" in prompt
         # The message tags should protect against injection
-        assert "<message>" in prompt
+        assert "<message" in prompt
         assert "</message>" in prompt
 
     def test_content_is_not_injected_outside_message_tags(self) -> None:
         """Content should only appear inside <message> tags, not elsewhere as prompt."""
         content = "DISREGARD_PREVIOUS_INSTRUCTIONS"
-        task = {"content": content, "business_id": 1}
+        task = {"msg_id": 99, "source": "at", "content": content, "business_id": 1}
         prompt = build_classification_prompt(task)
-        # Count occurrences - should appear exactly once (inside message tags)
-        # But first let's ensure it's inside the message tags
-        msg_start = prompt.index("<message>")
+        # Find the message tag boundaries
+        msg_start = prompt.index("<message")
         msg_end = prompt.index("</message>") + len("</message>")
         before_msg = prompt[:msg_start]
         after_msg = prompt[msg_end:]
         assert content not in before_msg
         assert content not in after_msg
         # Content should be wrapped in message tags
-        assert f"<message>{content}</message>" in prompt
+        assert f">{content}</message>" in prompt
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -455,5 +459,15 @@ class TestParseLLMResultDictStructure:
 ```"""
         result = parse_llm_result(llm_text)
         assert result is not None
-        # Extra field is in the raw dict but our validated dict should only have 4 keys
+        # Extra field is in the raw dict but our validated dict should only have the expected keys
         assert set(result.keys()) == {"skill_name", "params", "confidence", "reason"}
+
+    def test_msg_id_is_preserved_when_present(self) -> None:
+        """When LLM includes msg_id in output, it should be preserved."""
+        llm_text = """```json
+{"msg_id": 1001, "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "分析视频"}
+```"""
+        result = parse_llm_result(llm_text)
+        assert result is not None
+        assert result["msg_id"] == 1001
+        assert result["skill_name"] == "video-analyzer"
