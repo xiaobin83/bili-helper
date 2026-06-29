@@ -127,12 +127,10 @@ class Processor:
 
             # ── Phase 1: Classifying ─────────────────────────────────
             try:
-                await db.update_task_status(msg_id, source, "classifying")
-
                 # 2a. Build prompt
                 prompt = classifier.build_classification_prompt(task)
 
-                # 2b. Dry run — print and skip
+                # 2b. Dry run — print and skip, no DB changes
                 if dry_run:
                     print(f"[DRY-RUN] Task {msg_id}/{source}")
                     print(f"[DRY-RUN] Prompt:\n{prompt}")
@@ -140,7 +138,7 @@ class Processor:
                     results.append(task_result)
                     continue
 
-                # 2c. No LLM result yet — print prompt and skip
+                # 2c. No LLM result yet — print prompt and skip, no DB changes
                 if llm_result is None:
                     print(f"[PROMPT] Task {msg_id}/{source}")
                     print(prompt)
@@ -148,7 +146,8 @@ class Processor:
                     results.append(task_result)
                     continue
 
-                # 2d. Parse LLM result
+                # 2d. Mark classifying and parse LLM result
+                await db.update_task_status(msg_id, source, "classifying")
                 classification = classifier.parse_llm_result(llm_result)
                 if classification is None:
                     await db.update_task_status(

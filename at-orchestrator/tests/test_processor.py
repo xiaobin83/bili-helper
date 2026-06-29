@@ -147,7 +147,7 @@ class TestProcessPendingDryRun:
         captured = capsys.readouterr()
         assert "PROMPT_CONTENT" in captured.out
         mock_disp.dispatch_with_timeout.assert_not_called()
-        mock_db.update_task_status.assert_called()
+        mock_db.update_task_status.assert_not_called()
         assert len(results) == 1
         assert results[0]["status"] == "classifying"
 
