@@ -173,9 +173,27 @@ async def _handle_fetch(args: argparse.Namespace) -> None:
         os.makedirs(Path(args.db_path).parent, exist_ok=True)
         await at_db.init_db(args.db_path)
 
+        # Read cursors from previous fetch for incremental polling
+        reply_cursor = await at_db.get_cursor("reply")
+        at_cursor = await at_db.get_cursor("at")
+
         fetcher = Fetcher(client)
-        reply_tasks = await fetcher.fetch_reply_messages()
-        at_tasks = await fetcher.fetch_at_messages()
+        reply_tasks = await fetcher.fetch_reply_messages(
+            cursor_id=reply_cursor[0] if reply_cursor else None,
+            cursor_time=reply_cursor[1] if reply_cursor else None,
+        )
+        at_tasks = await fetcher.fetch_at_messages(
+            cursor_id=at_cursor[0] if at_cursor else None,
+            cursor_time=at_cursor[1] if at_cursor else None,
+        )
+
+        # Save cursors for next incremental fetch
+        r_cid, r_ctime = fetcher.reply_cursor
+        a_cid, a_ctime = fetcher.at_cursor
+        if r_cid is not None and r_ctime is not None:
+            await at_db.set_cursor("reply", r_cid, r_ctime)
+        if a_cid is not None and a_ctime is not None:
+            await at_db.set_cursor("at", a_cid, a_ctime)
 
         all_tasks = reply_tasks + at_tasks
         inserted = 0

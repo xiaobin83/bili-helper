@@ -27,13 +27,18 @@ class Fetcher:
     """Polls Bilibili msgfeed endpoints for AT and reply notifications.
 
     Each method returns a list of ``dict`` objects matching the db schema,
-    ready for ``insert_task()``.  The caller is responsible for db storage.
+    ready for ``insert_task()``.  After a successful fetch, the API cursor
+    is available on ``reply_cursor`` / ``at_cursor`` as ``(int, float)``
+    or ``(None, None)`` so the caller can persist it for incremental
+    polling.
     """
 
-    __slots__ = ("_client",)
+    __slots__ = ("_client", "reply_cursor", "at_cursor")
 
     def __init__(self, client: BiliHTTPClient) -> None:
         self._client = client
+        self.reply_cursor: tuple[int | None, float | None] = (None, None)
+        self.at_cursor: tuple[int | None, float | None] = (None, None)
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -47,6 +52,9 @@ class Fetcher:
         When *cursor_id* and *cursor_time* are ``None`` (first run), only
         the latest page is fetched.  Otherwise, pass them as query params
         for cursor-based pagination.
+
+        After calling, ``self.reply_cursor`` holds the cursor from the
+        API response (or ``(None, None)``).
         """
         params: dict = {}
         if cursor_id is not None and cursor_time is not None:
@@ -64,6 +72,8 @@ class Fetcher:
         """Fetch AT (@) notifications from ``/x/msgfeed/at``.
 
         Pagination behaviour is the same as ``fetch_reply_messages()``.
+        After calling, ``self.at_cursor`` holds the cursor from the API
+        response.
         """
         params: dict = {}
         if cursor_id is not None and cursor_time is not None:
@@ -75,26 +85,47 @@ class Fetcher:
 
     # ── Parsing helpers ───────────────────────────────────────────────
 
-    def _parse_items(self, response: dict, *, source: str) -> list[dict]:
-        """Parse a msgfeed response into a list of task dicts.
+    def _set_cursor(
+        self, source: str, cursor_id: object, cursor_time: object
+    ) -> None:
+        """Set the cursor attribute for *source* after parsing."""
+        cid = int(cursor_id) if isinstance(cursor_id, int) else None
+        ctime = float(cursor_time) if isinstance(cursor_time, (int, float)) else None
+        if source == "at":
+            self.at_cursor = (cid, ctime)
+        else:
+            self.reply_cursor = (cid, ctime)
 
-        Handles missing / malformed responses gracefully: returns ``[]``
-        for any unexpected shape.
+    def _parse_items(
+        self, response: dict, *, source: str
+    ) -> list[dict]:
+        """Parse a msgfeed response into task dicts.
+
+        Also stores the API cursor on ``self.reply_cursor`` or
+        ``self.at_cursor`` depending on *source*.
+
+        Returns ``[]`` for any unexpected response shape.
         """
         if response.get("code") != 0:
+            self._set_cursor(source, None, None)
             return []
 
         data = response.get("data")
         if not isinstance(data, dict):
+            self._set_cursor(source, None, None)
             return []
 
         items: list = data.get("items")  # type: ignore[assignment]
         if not isinstance(items, list):
+            self._set_cursor(source, None, None)
             return []
 
         cursor: dict = data.get("cursor") if isinstance(data.get("cursor"), dict) else {}  # type: ignore[assignment]
         cursor_id = cursor.get("id")
         cursor_time = cursor.get("time")
+
+        # Persist cursor for caller to save
+        self._set_cursor(source, cursor_id, cursor_time)
 
         now = time.time()
         tasks: list[dict] = []
