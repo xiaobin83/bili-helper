@@ -13,7 +13,7 @@ description: 处理B站@消息、B站互动编排、自动回复、B站动态响
 
 **核心能力**：
 - 自动拉取 @ 消息和回复通知（B站 API `x/msgfeed/at` + `x/msgfeed/reply`）
-- LLM 分类到 5 种 skill（video-analyzer / watch-later-recommender / dyn-publisher / fav-organizer / unknown）
+- LLM 分类到 3 种 skill（video-analyzer / watch-later-recommender / unknown）
 - 异步子进程分派子 skill
 - 智能路由回复：短结果 → 评论回复，长结果 → 私信
 - SQLite 持久化（任务状态机 + 游标分页）
@@ -77,7 +77,7 @@ cat /tmp/llm-output.json | uv run at-orchestrator process --apply-llm-result -
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `skill_name` | `str` | 命中的 skill 名称，必须为 5 种之一 |
+| `skill_name` | `str` | 命中的 skill 名称，必须为 3 种之一 |
 | `params` | `dict` | 分派给子 skill 的参数 |
 | `confidence` | `float` | 置信度，范围 0.0-1.0 |
 | `reason` | `str` | 分类理由（非空字符串） |
@@ -175,15 +175,12 @@ uv run at-orchestrator reset --force
 
 ## 分类逻辑
 
-at-orchestrator 将 LLM 分类结果映射到 5 种 skill。LLM prompt 由工具自动生成，包含以下 5 个 few-shot 示例：
+at-orchestrator 将 LLM 分类结果映射到 3 种 skill。LLM prompt 由工具自动生成，包含以下 2 个 few-shot 示例：
 
 | # | 消息 | 分类结果 | 说明 |
 |---|------|---------|------|
 | 1 | "分析这个视频BV1xx" | `{"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "用户明确要求分析视频"}` | 视频分析 |
-| 2 | "推荐几个AI相关的视频" | `{"skill_name": "watch-later-recommender", "params": {"topic": "AI"}, "confidence": 0.9, "reason": "用户请求视频推荐"}` | 智能推荐 |
-| 3 | "帮我发一条动态，说今天发布了新版本" | `{"skill_name": "dyn-publisher", "params": {"text": "今天发布了新版本"}, "confidence": 0.85, "reason": "用户要求发布动态"}` | 动态发布 |
-| 4 | "整理一下我的收藏夹" | `{"skill_name": "fav-organizer", "params": {}, "confidence": 0.9, "reason": "用户请求整理收藏夹"}` | 收藏夹整理 |
-| 5 | "今天天气不错" | `{"skill_name": "unknown", "params": {}, "confidence": 0.95, "reason": "与B站功能无关的闲聊消息"}` | 无法匹配 |
+| 2 | "今天天气不错" | `{"skill_name": "unknown", "params": {}, "confidence": 0.95, "reason": "与B站功能无关的闲聊消息"}` | 无法匹配 |
 
 ### 可用技能
 
@@ -191,14 +188,12 @@ at-orchestrator 将 LLM 分类结果映射到 5 种 skill。LLM prompt 由工具
 |------|---------|---------|
 | `video-analyzer` | 用户询问视频详情、分析视频内容 | `uv run video-analyzer --bvid <bvid> --output <file>` |
 | `watch-later-recommender` | 用户请求推荐视频、稍后再看推荐 | `uv run watch-later-recommender --target <target> --count <n>` |
-| `dyn-publisher` | 用户要求发布动态 | `uv run dyn-publisher publish --text <text>` |
-| `fav-organizer` | 用户请求整理收藏夹 | `uv run fav-organizer classify --all` |
 | `unknown` | 无法匹配以上任何技能 | 不执行分派，直接标记为已回复 |
 
 ### 分类 prompt 模板
 
 工具生成的 prompt 包含：
-1. 5 个 few-shot 示例（如上表）
+1. 2 个 few-shot 示例（如上表）
 2. 用户消息内容（包裹在 `<message>...</message>` 标签中，防注入）
 3. 业务上下文（视频评论 / 动态回复 / 动态）
 4. JSON 输出格式要求
@@ -325,7 +320,7 @@ cd at-orchestrator && uv sync
 
 ## 与项目其他工具共享凭证
 
-at-orchestrator 与 watch-later-recommender、fav-organizer、dyn-publisher、video-analyzer 共享 B站 凭证。使用统一的环境变量前缀 `BILI_*`。
+at-orchestrator 与 watch-later-recommender、video-analyzer 共享 B站 凭证。使用统一的环境变量前缀 `BILI_*`。
 
 ```bash
 # 通用方式

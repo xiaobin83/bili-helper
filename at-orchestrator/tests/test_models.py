@@ -230,13 +230,13 @@ class TestClassificationResult:
 
     def test_extra_fields_are_ignored(self) -> None:
         result = ClassificationResult.model_validate({
-            "skill_name": "dyn-publisher",
-            "params": {"text": "hello"},
+            "skill_name": "video-analyzer",
+            "params": {"bvid": "BV1xx"},
             "confidence": 0.75,
-            "reason": "需要发布动态",
+            "reason": "需要分析视频",
             "extra_field": "will be ignored",
         })
-        assert result.skill_name == "dyn-publisher"
+        assert result.skill_name == "video-analyzer"
         assert "extra_field" not in result.model_dump()
 
     def test_invalid_skill_name_raises_error(self) -> None:
@@ -251,21 +251,21 @@ class TestClassificationResult:
     def test_confidence_range(self) -> None:
         with pytest.raises(ValidationError):
             ClassificationResult(
-                skill_name="fav-organizer",
+                skill_name="video-analyzer",
                 params={},
                 confidence=1.5,  # > 1.0
                 reason="too high",
             )
         with pytest.raises(ValidationError):
             ClassificationResult(
-                skill_name="fav-organizer",
+                skill_name="video-analyzer",
                 params={},
                 confidence=-0.1,  # < 0
                 reason="too low",
             )
 
     def test_all_valid_skill_names(self) -> None:
-        names = ["video-analyzer", "watch-later-recommender", "dyn-publisher", "fav-organizer", "unknown"]
+        names = ["video-analyzer", "watch-later-recommender", "unknown"]
         for name in names:
             result = ClassificationResult(
                 skill_name=name,  # type: ignore[arg-type]
@@ -293,20 +293,20 @@ class TestDispatchResult:
 
     def test_full_dispatch(self) -> None:
         result = DispatchResult(
-            skill="fav-organizer",
+            skill="video-analyzer",
             exit_code=1,
             stdout="",
             output_file="/tmp/output.json",
-            error="分类失败",
+            error="分析失败",
         )
-        assert result.skill == "fav-organizer"
+        assert result.skill == "video-analyzer"
         assert result.exit_code == 1
         assert result.output_file == "/tmp/output.json"
-        assert result.error == "分类失败"
+        assert result.error == "分析失败"
 
     def test_output_file_can_be_none(self) -> None:
         result = DispatchResult(
-            skill="dyn-publisher",
+            skill="watch-later-recommender",
             exit_code=0,
             stdout="ok",
         )
@@ -314,7 +314,7 @@ class TestDispatchResult:
 
     def test_error_can_be_none(self) -> None:
         result = DispatchResult(
-            skill="dyn-publisher",
+            skill="watch-later-recommender",
             exit_code=0,
             stdout="ok",
         )

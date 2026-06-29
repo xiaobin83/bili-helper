@@ -255,7 +255,7 @@ class TestProcessPendingReplyCommentSuccess:
         from at_orchestrator.processor import Processor
         client = MagicMock()
         task = _make_task(subject_id=12345, root_id=50, source_id=60)
-        dispatch_result = _make_dispatch_result(skill="dyn-publisher", stdout="动态已发布")
+        dispatch_result = _make_dispatch_result(skill="video-analyzer", stdout="分析完成")
 
         with patch("at_orchestrator.processor.db") as mock_db, \
              patch("at_orchestrator.processor.classifier") as mock_classifier, \
@@ -266,7 +266,7 @@ class TestProcessPendingReplyCommentSuccess:
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "dyn-publisher", "params": {"text": "你好"},
+                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
             }
             mock_disp = MagicMock()
@@ -275,13 +275,13 @@ class TestProcessPendingReplyCommentSuccess:
             mock_replier.reply_comment = AsyncMock(return_value=True)
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("dyn-publisher", text="你好"))
+                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
 
         mock_replier.reply_comment.assert_called_once()
         args = mock_replier.reply_comment.call_args
         assert args[0][0] is client
         assert args[0][1] == task
-        assert args[0][2] == "动态已发布"
+        assert args[0][2] == "分析完成"
         mock_db.update_task_status.assert_any_call(1001, "reply", "replied")
         mock_db.update_task_reply.assert_called_with(1001, "reply", "comment")
         assert results[0]["status"] == "replied"
@@ -335,7 +335,7 @@ class TestProcessPendingPmFallbackToComment:
         client = MagicMock()
         task = _make_task(subject_id=12345, user_mid=99999)
         long_stdout = "x" * 500
-        dispatch_result = _make_dispatch_result(skill="fav-organizer", stdout=long_stdout)
+        dispatch_result = _make_dispatch_result(skill="video-analyzer", stdout=long_stdout)
 
         with patch("at_orchestrator.processor.db") as mock_db, \
              patch("at_orchestrator.processor.classifier") as mock_classifier, \
@@ -346,7 +346,7 @@ class TestProcessPendingPmFallbackToComment:
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "fav-organizer", "params": {},
+                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
             }
             mock_disp = MagicMock()
@@ -356,7 +356,7 @@ class TestProcessPendingPmFallbackToComment:
             mock_replier.reply_comment = AsyncMock(return_value=True)
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("fav-organizer"))
+                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
 
         mock_replier.reply_pm.assert_not_called()
         mock_replier.reply_comment.assert_called_once()
@@ -386,7 +386,7 @@ class TestProcessPendingReplyFails:
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "dyn-publisher", "params": {"text": "hello"},
+                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
             }
             mock_disp = MagicMock()
@@ -395,7 +395,7 @@ class TestProcessPendingReplyFails:
             mock_replier.reply_comment = AsyncMock(return_value=False)
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("dyn-publisher", text="hello"))
+                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
 
         calls = [c[0] for c in mock_db.update_task_status.call_args_list]
         assert (1001, "reply", "replying") in calls
@@ -419,7 +419,7 @@ class TestProcessPendingReplyFails:
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "fav-organizer", "params": {},
+                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
             }
             mock_disp = MagicMock()
@@ -429,7 +429,7 @@ class TestProcessPendingReplyFails:
             mock_replier.reply_comment = AsyncMock(return_value=False)
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("fav-organizer"))
+                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
 
         mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="reply_failed")
         assert results[0]["status"] == "failed"
@@ -455,7 +455,7 @@ class TestProcessPendingMultipleTasks:
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "dyn-publisher", "params": {"text": "hello"},
+                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
             }
             mock_disp = MagicMock()
@@ -464,7 +464,7 @@ class TestProcessPendingMultipleTasks:
             mock_replier.reply_comment = AsyncMock(return_value=True)
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=10,
-                llm_result=_make_llm_result_json("dyn-publisher", text="hello"))
+                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
 
         assert len(results) == 2
         assert results[0]["msg_id"] == 1
@@ -537,7 +537,7 @@ class TestProcessPendingExceptionHandling:
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "dyn-publisher", "params": {"text": "hello"},
+                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
             }
             mock_disp = MagicMock()
@@ -546,7 +546,7 @@ class TestProcessPendingExceptionHandling:
             mock_replier.reply_comment = AsyncMock(side_effect=ConnectionError("network down"))
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("dyn-publisher", text="hello"))
+                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
 
         mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="reply_exception: network down")
         assert results[0]["status"] == "failed"
@@ -570,7 +570,7 @@ class TestProcessPendingResultStructure:
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "dyn-publisher", "params": {"text": "hello"},
+                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
             }
             mock_disp = MagicMock()
@@ -579,7 +579,7 @@ class TestProcessPendingResultStructure:
             mock_replier.reply_comment = AsyncMock(return_value=True)
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("dyn-publisher", text="hello"))
+                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
 
         r = results[0]
         assert r["msg_id"] == 1001

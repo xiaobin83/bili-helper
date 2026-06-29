@@ -40,14 +40,12 @@ class TestBusinessIdToType:
 
 
 class TestSkillCliMap:
-    """SKILL_CLI_MAP — covers all 4 registered skills with correct CLI config."""
+    """SKILL_CLI_MAP — covers all 2 registered skills with correct CLI config."""
 
-    def test_all_four_skills_present(self) -> None:
+    def test_all_two_skills_present(self) -> None:
         assert set(SKILL_CLI_MAP.keys()) == {
             "video-analyzer",
             "watch-later-recommender",
-            "dyn-publisher",
-            "fav-organizer",
         }
 
     def test_video_analyzer_config(self) -> None:
@@ -60,16 +58,6 @@ class TestSkillCliMap:
         assert cfg["command"] == "watch-later-recommender"
         assert "subcommand" not in cfg
         assert "output_flag" not in cfg
-
-    def test_dyn_publisher_config(self) -> None:
-        cfg = SKILL_CLI_MAP["dyn-publisher"]
-        assert cfg["command"] == "dyn-publisher"
-        assert cfg["subcommand"] == "publish"
-
-    def test_fav_organizer_config(self) -> None:
-        cfg = SKILL_CLI_MAP["fav-organizer"]
-        assert cfg["command"] == "fav-organizer"
-        assert cfg["subcommand"] == "classify"
 
 
 class TestNumericConstants:

@@ -55,22 +55,9 @@ def _build_watch_later_args(params: dict[str, Any]) -> list[str]:
     return ["uv", "run", "watch-later-recommender", "--target", target, "--count", count]
 
 
-def _build_dyn_publisher_args(params: dict[str, Any]) -> list[str]:
-    """Build CLI args for the dyn-publisher skill."""
-    text = str(params["text"])
-    return ["uv", "run", "dyn-publisher", "publish", "--text", text]
-
-
-def _build_fav_organizer_args(_params: dict[str, Any]) -> list[str]:
-    """Build CLI args for the fav-organizer skill."""
-    return ["uv", "run", "fav-organizer", "classify", "--all"]
-
-
 _SKILL_BUILDERS: dict[str, Any] = {
     "video-analyzer": _build_video_analyzer_args,
     "watch-later-recommender": _build_watch_later_args,
-    "dyn-publisher": _build_dyn_publisher_args,
-    "fav-organizer": _build_fav_organizer_args,
 }
 
 # Skills that produce an output file (``--output`` flag is passed).
@@ -100,7 +87,7 @@ def _to_skill_args(skill_name: str, params: dict[str, Any]) -> list[str]:
     Examples:
         >>> _to_skill_args("video-analyzer", {"bvid": "BV1xx"})
         ['--bvid', 'BV1xx']
-        >>> _to_skill_args("fav-organizer", {})
+        >>> _to_skill_args("video-analyzer", {})
         []
     """
     args: list[str] = []

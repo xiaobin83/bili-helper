@@ -79,7 +79,7 @@ class TestToSkillArgs:
         """Empty params dict returns empty list."""
         from at_orchestrator.dispatcher import _to_skill_args
 
-        result = _to_skill_args("fav-organizer", {})
+        result = _to_skill_args("video-analyzer", {})
         assert result == []
 
     def test_values_converted_to_strings(self) -> None:
@@ -100,8 +100,8 @@ class TestToSkillArgs:
         """Params with spaces or special chars are preserved as-is."""
         from at_orchestrator.dispatcher import _to_skill_args
 
-        result = _to_skill_args("dyn-publisher", {"text": "Hello World! @user #bili"})
-        assert result == ["--text", "Hello World! @user #bili"]
+        result = _to_skill_args("video-analyzer", {"bvid": "BV1xx @user #bili"})
+        assert result == ["--bvid", "BV1xx @user #bili"]
 
     def test_multiple_params_ordered(self) -> None:
         """Params are output in dict insertion order (Python 3.7+)."""
@@ -350,7 +350,7 @@ class TestDispatchWithTimeoutNonZero:
         """Error message includes stderr output from the subprocess."""
         from at_orchestrator.dispatcher import Dispatcher
 
-        classification = _make_classification("fav-organizer")
+        classification = _make_classification("watch-later-recommender", topic="AI")
         task = _make_task()
 
         mock_proc = _make_mock_process(

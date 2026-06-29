@@ -34,17 +34,15 @@ class TestBuildClassificationPrompt:
         prompt = build_classification_prompt(task)
         assert "video-analyzer" in prompt
         assert "watch-later-recommender" in prompt
-        assert "dyn-publisher" in prompt
-        assert "fav-organizer" in prompt
         assert "unknown" in prompt
 
-    def test_contains_at_least_4_few_shot_examples(self) -> None:
+    def test_contains_at_least_2_few_shot_examples(self) -> None:
         task = {"content": "test", "business_id": 1}
         prompt = build_classification_prompt(task)
         # Each few-shot example should contain a skill_name assignment
         occurrences = prompt.count('"skill_name"')
-        # At least 4 few-shot examples should have "skill_name" in them
-        assert occurrences >= 4, f"Expected >=4 few-shot examples, found {occurrences} 'skill_name' occurrences"
+        # At least 2 few-shot examples should have "skill_name" in them
+        assert occurrences >= 2, f"Expected >=2 few-shot examples, found {occurrences} 'skill_name' occurrences"
 
     def test_contains_business_context_section(self) -> None:
         task = {"content": "test", "business_id": 1}
@@ -150,19 +148,19 @@ This is the result."""
         """JSON with newlines inside the fence should parse correctly (re.DOTALL)."""
         llm_text = """```json
 {
-  "skill_name": "dyn-publisher",
+  "skill_name": "video-analyzer",
   "params": {
-    "text": "hello world"
+    "bvid": "BV1xx"
   },
-  "confidence": 0.8,
-  "reason": "用户想发动态"
+  "confidence": 0.95,
+  "reason": "用户想分析视频"
 }
 ```"""
         result = parse_llm_result(llm_text)
         assert result is not None
-        assert result["skill_name"] == "dyn-publisher"
-        assert result["params"] == {"text": "hello world"}
-        assert result["confidence"] == 0.8
+        assert result["skill_name"] == "video-analyzer"
+        assert result["params"] == {"bvid": "BV1xx"}
+        assert result["confidence"] == 0.95
 
     def test_multiple_json_blocks_uses_first_fence(self) -> None:
         """When multiple JSON blocks exist, first ```json fence wins."""
@@ -179,7 +177,7 @@ Some more text...
 
     def test_conf_in_fence_range(self) -> None:
         llm_text = """```json
-{"skill_name": "fav-organizer", "params": {}, "confidence": 0, "reason": "no confidence"}
+{"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0, "reason": "no confidence"}
 ```"""
         result = parse_llm_result(llm_text)
         assert result is not None
@@ -198,11 +196,11 @@ class TestParseLLMResultBareJSON:
     """parse_llm_result — extracts bare JSON without fences."""
 
     def test_extracts_bare_json(self) -> None:
-        llm_text = """Classification result: {"skill_name": "fav-organizer", "params": {}, "confidence": 0.9, "reason": "整理收藏夹"} Done."""
+        llm_text = """Classification result: {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "分析视频"} Done."""
         result = parse_llm_result(llm_text)
         assert result is not None
-        assert result["skill_name"] == "fav-organizer"
-        assert result["params"] == {}
+        assert result["skill_name"] == "video-analyzer"
+        assert result["params"] == {"bvid": "BV1xx"}
         assert result["confidence"] == 0.9
 
     def test_extracts_bare_json_with_surrounding_noise(self) -> None:
@@ -333,7 +331,7 @@ class TestParseLLMResultEdgeCases:
 
     def test_params_empty_dict(self) -> None:
         llm_text = """```json
-{"skill_name": "fav-organizer", "params": {}, "confidence": 0.9, "reason": "整理"}
+{"skill_name": "video-analyzer", "params": {}, "confidence": 0.9, "reason": "分析"}
 ```"""
         result = parse_llm_result(llm_text)
         assert result is not None
@@ -390,21 +388,21 @@ class TestParseLLMResultEdgeCases:
         llm_text = """I've thought about this carefully and determined that:
 
 ```json
-{"skill_name": "dyn-publisher", "params": {"text": "发布内容"}, "confidence": 0.75, "reason": "发布动态"}
+{"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "分析视频"}
 ```
 
 Let me know if you need adjustments!"""
         result = parse_llm_result(llm_text)
         assert result is not None
-        assert result["skill_name"] == "dyn-publisher"
+        assert result["skill_name"] == "video-analyzer"
 
     def test_only_json_fence_no_other_text(self) -> None:
         llm_text = """```json
-{"skill_name": "fav-organizer", "params": {}, "confidence": 0.85, "reason": "仅JSON"}
+{"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.85, "reason": "仅JSON"}
 ```"""
         result = parse_llm_result(llm_text)
         assert result is not None
-        assert result["skill_name"] == "fav-organizer"
+        assert result["skill_name"] == "video-analyzer"
 
 
 class TestParseLLMResultDictStructure:

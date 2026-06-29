@@ -46,14 +46,6 @@ SKILL_CLI_MAP: dict[str, dict] = {
     "watch-later-recommender": {
         "command": "watch-later-recommender",
     },
-    "dyn-publisher": {
-        "command": "dyn-publisher",
-        "subcommand": "publish",
-    },
-    "fav-organizer": {
-        "command": "fav-organizer",
-        "subcommand": "classify",
-    },
 }
 
 

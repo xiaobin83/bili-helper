@@ -2,8 +2,7 @@
 
 Provides:
 - ``build_classification_prompt()``: Builds an LLM prompt to classify an AT message
-  into one of 5 skills (video-analyzer, watch-later-recommender, dyn-publisher,
-  fav-organizer, unknown).
+  into one of 3 skills (video-analyzer, watch-later-recommender, unknown).
 - ``parse_llm_result()``: Extracts and validates JSON from an LLM text response.
 """
 
@@ -35,24 +34,13 @@ _CLASSIFICATION_PROMPT = """你是 B站 at-orchestrator 消息分类助手。
 可用技能：
 - video-analyzer: 询问视频详情、分析视频内容
 - watch-later-recommender: 推荐视频、稍后再看推荐
-- dyn-publisher: 发布动态
-- fav-organizer: 整理收藏夹
 - unknown: 无法匹配以上任何技能
 
 Few-shot 示例：
 1. 消息: "分析这个视频BV1xx"
    输出: {{"skill_name": "video-analyzer", "params": {{"bvid": "BV1xx"}}, "confidence": 0.95, "reason": "用户明确要求分析视频"}}
 
-2. 消息: "推荐几个AI相关的视频"
-   输出: {{"skill_name": "watch-later-recommender", "params": {{"topic": "AI"}}, "confidence": 0.9, "reason": "用户请求视频推荐"}}
-
-3. 消息: "帮我发一条动态，说今天发布了新版本"
-   输出: {{"skill_name": "dyn-publisher", "params": {{"text": "今天发布了新版本"}}, "confidence": 0.85, "reason": "用户要求发布动态"}}
-
-4. 消息: "整理一下我的收藏夹"
-   输出: {{"skill_name": "fav-organizer", "params": {{}}, "confidence": 0.9, "reason": "用户请求整理收藏夹"}}
-
-5. 消息: "今天天气不错"
+2. 消息: "今天天气不错"
    输出: {{"skill_name": "unknown", "params": {{}}, "confidence": 0.95, "reason": "与B站功能无关的闲聊消息"}}
 
 现在请分类以下消息：
@@ -75,7 +63,7 @@ def build_classification_prompt(task_dict: dict[str, Any]) -> str:
     Returns:
         Formatted prompt string ready for LLM consumption.
 
-    The prompt includes skill descriptions, 5 few-shot examples,
+    The prompt includes skill descriptions, 2 few-shot examples,
     user content wrapped in ``<message>...</message>`` tags for injection
     protection, and business context.
     """

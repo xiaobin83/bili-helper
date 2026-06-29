@@ -113,55 +113,6 @@ class TestSkillArgMapping:
             "5",
         ]
 
-    @pytest.mark.asyncio
-    async def test_dyn_publisher_args(self) -> None:
-        """dyn-publisher: publish --text TEXT."""
-        from at_orchestrator.dispatcher import Dispatcher
-
-        classification = _make_classification(
-            "dyn-publisher", text="Hello World!"
-        )
-        task = _make_task()
-
-        mock_proc = _make_mock_process()
-        with patch("asyncio.create_subprocess_exec") as mock_exec:
-            mock_exec.return_value = mock_proc
-            dispatcher = Dispatcher()
-            await dispatcher.dispatch(classification, task)
-
-        call_args = mock_exec.call_args[0]
-        assert list(call_args) == [
-            "uv",
-            "run",
-            "dyn-publisher",
-            "publish",
-            "--text",
-            "Hello World!",
-        ]
-
-    @pytest.mark.asyncio
-    async def test_fav_organizer_args(self) -> None:
-        """fav-organizer: classify --all."""
-        from at_orchestrator.dispatcher import Dispatcher
-
-        classification = _make_classification("fav-organizer")
-        task = _make_task()
-
-        mock_proc = _make_mock_process()
-        with patch("asyncio.create_subprocess_exec") as mock_exec:
-            mock_exec.return_value = mock_proc
-            dispatcher = Dispatcher()
-            await dispatcher.dispatch(classification, task)
-
-        call_args = mock_exec.call_args[0]
-        assert list(call_args) == [
-            "uv",
-            "run",
-            "fav-organizer",
-            "classify",
-            "--all",
-        ]
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Test: output directory creation
@@ -178,7 +129,7 @@ class TestOutputDirectory:
 
         # Use tmp_path as base to avoid polluting real /tmp
         base_dir = tmp_path / "at-orchestrator"
-        classification = _make_classification("fav-organizer")
+        classification = _make_classification("video-analyzer", bvid="BV1xx")
         task = _make_task(msg_id=42, source="reply")
 
         mock_proc = _make_mock_process()
@@ -330,7 +281,7 @@ class TestSubprocessFailure:
         """stderr should be appended to stdout."""
         from at_orchestrator.dispatcher import Dispatcher
 
-        classification = _make_classification("fav-organizer")
+        classification = _make_classification("watch-later-recommender", topic="AI")
         task = _make_task()
 
         mock_proc = _make_mock_process(
@@ -407,7 +358,7 @@ class TestCwd:
         """cwd kwarg should be passed to create_subprocess_exec."""
         from at_orchestrator.dispatcher import Dispatcher
 
-        classification = _make_classification("fav-organizer")
+        classification = _make_classification("video-analyzer", bvid="BV1xx")
         task = _make_task()
 
         mock_proc = _make_mock_process()

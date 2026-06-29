@@ -20,8 +20,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 VALID_SKILLS: frozenset[str] = frozenset({
     "video-analyzer",
     "watch-later-recommender",
-    "dyn-publisher",
-    "fav-organizer",
     "unknown",
 })
 
@@ -51,14 +49,6 @@ SKILL_CLI_MAP: dict[str, dict] = {
     },
     "watch-later-recommender": {
         "command": "watch-later-recommender",
-    },
-    "dyn-publisher": {
-        "command": "dyn-publisher",
-        "subcommand": "publish",
-    },
-    "fav-organizer": {
-        "command": "fav-organizer",
-        "subcommand": "classify",
     },
 }
 

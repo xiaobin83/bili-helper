@@ -251,13 +251,13 @@ class TestReplyFailure:
         assert await db.insert_task(task) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("dyn-publisher", text="hello")
+        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
 
         # Dispatch succeeds but reply fails
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch_with_timeout = AsyncMock(
             return_value=_make_dispatch_result(
-                skill="dyn-publisher", stdout="ok", exit_code=0
+                skill="video-analyzer", stdout="ok", exit_code=0
             )
         )
 
@@ -280,7 +280,7 @@ class TestReplyFailure:
             )
             results = await processor.process_pending(
                 limit=1,
-                llm_result='{"skill_name":"dyn-publisher","params":{"text":"hello"},"confidence":0.9,"reason":"test"}',
+                llm_result='{"skill_name":"video-analyzer","params":{"bvid":"BV1xx"},"confidence":0.95,"reason":"test"}',
             )
 
         # Verify result
@@ -355,13 +355,13 @@ class TestBatchProcessing:
             assert await db.insert_task(t) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("dyn-publisher", text="hello")
+        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
 
         # All mocks return success
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch_with_timeout = AsyncMock(
             return_value=_make_dispatch_result(
-                skill="dyn-publisher", stdout="ok", exit_code=0
+                skill="video-analyzer", stdout="ok", exit_code=0
             )
         )
 
@@ -384,7 +384,7 @@ class TestBatchProcessing:
             )
             results = await processor.process_pending(
                 limit=3,
-                llm_result='{"skill_name":"dyn-publisher","params":{"text":"hello"},"confidence":0.9,"reason":"test"}',
+                llm_result='{"skill_name":"video-analyzer","params":{"bvid":"BV1xx"},"confidence":0.95,"reason":"test"}',
             )
 
         # All 3 tasks processed
@@ -417,7 +417,7 @@ class TestBatchProcessing:
             assert await db.insert_task(t) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("dyn-publisher", text="hello")
+        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
 
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch_with_timeout = AsyncMock(
@@ -493,7 +493,7 @@ class TestBatchProcessing:
             assert await db.insert_task(t) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("dyn-publisher", text="hello")
+        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
 
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch_with_timeout = AsyncMock(
