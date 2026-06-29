@@ -1,6 +1,6 @@
-"""Replier module — sends comment replies to B站 via the comment API.
+"""Replier module — sends comment replies and private messages via B站 APIs.
 
-TDD: see tests/test_replier.py for the full test suite.
+TDD: see tests/test_replier.py and tests/test_replier_pm.py for the test suites.
 """
 
 from __future__ import annotations
@@ -139,4 +139,161 @@ async def reply_comment(
         code,
         result.get("message", ""),
     )
+    return False
+
+
+# ── Private message API ──────────────────────────────────────────────────
+
+_PM_SEND_URL = "https://api.vc.bilibili.com/web_im/v1/web_im/send_msg"
+_PM_SESSION_URL = "https://api.vc.bilibili.com/web_im/v1/web_im/session_detail"
+
+
+async def reply_pm(
+    client: object,  # BiliHTTPClient (avoid circular import)
+    sender_uid: int,
+    receiver_id: int,
+    content: str,
+) -> bool:
+    """Send a private message via the B站 web_im API.
+
+    Parameters
+    ----------
+    client:
+        A ``BiliHTTPClient`` instance with valid credentials.
+    sender_uid:
+        The UID of the sender (the logged-in user).
+    receiver_id:
+        The UID of the message recipient.
+    content:
+        Raw message text.  Automatically truncated to 600 characters
+        (~2000-byte safety margin for CJK multi-byte encoding).
+
+    Returns
+    -------
+    bool
+        ``True`` when the request succeeds (code=0).
+
+    Raises
+    ------
+    CSRFError
+        CSRF token is invalid (code=-111).  The caller must refresh
+        credentials.
+
+    Returns ``False`` for all other recoverable failures, including
+    authentication expiry (code=-101), 1-msg limit (21047), no phone
+    bound (21015), and unknown error codes.
+    """
+    import json
+    import time
+    import urllib.parse
+    import uuid
+
+    from bili_core.signing import sign_params
+
+    # -- generate dev_id ---------------------------------------------------
+    dev_id: str = str(uuid.uuid4())
+
+    # -- truncate content --------------------------------------------------
+    truncated: str = _truncate_for_comment(content, max_chars=600)
+
+    # -- build content JSON ------------------------------------------------
+    content_json: str = json.dumps({"content": truncated}, ensure_ascii=False)
+
+    # -- sign URL params ---------------------------------------------------
+    url_params: dict[str, object] = {
+        "w_sender_uid": sender_uid,
+        "w_receiver_id": receiver_id,
+        "w_dev_id": dev_id,
+    }
+    signed = sign_params(url_params)
+    signed_query: str = urllib.parse.urlencode(signed)
+    signed_url: str = f"{_PM_SEND_URL}?{signed_query}"
+
+    # -- build POST body ---------------------------------------------------
+    body: dict[str, object] = {
+        "msg[sender_uid]": sender_uid,
+        "msg[receiver_id]": receiver_id,
+        "msg[receiver_type]": 1,
+        "msg[msg_type]": 1,
+        "msg[dev_id]": dev_id,
+        "msg[timestamp]": int(time.time()),
+        "msg[content]": content_json,
+        "msg[new_face_version]": 1,
+        "csrf": client.bili_jct,  # type: ignore[union-attr]
+        "csrf_token": client.bili_jct,  # type: ignore[union-attr]
+    }
+
+    # -- execute -----------------------------------------------------------
+    try:
+        result: dict = await client.post(signed_url, data=body)  # type: ignore[union-attr]
+    except CSRFError:
+        raise  # fatal — caller must refresh credentials
+    except AuthError:
+        logger.warning("reply_pm: auth expired")
+        return False
+
+    code: int = result.get("code", -1)
+
+    if code == 0:
+        return True
+
+    logger.warning(
+        "reply_pm: code %s — %s",
+        code,
+        result.get("message", ""),
+    )
+    return False
+
+
+async def check_session_detail(
+    client: object,  # BiliHTTPClient (avoid circular import)
+    sender_uid: int,
+    receiver_id: int,
+) -> bool:
+    """Check if a private message conversation already exists between two users.
+
+    Calling this before ``reply_pm()`` avoids the 1-msg limit (error 21047):
+    when no session exists, prefer a comment reply over a private message.
+
+    Parameters
+    ----------
+    client:
+        A ``BiliHTTPClient`` instance with valid credentials.
+    sender_uid:
+        The UID of the sender (the logged-in user).
+    receiver_id:
+        The UID of the message recipient.
+
+    Returns
+    -------
+    bool
+        ``True`` if a session already exists between the two users.
+        ``False`` if no session exists or the check fails (e.g. auth expired).
+
+    Raises
+    ------
+    CSRFError
+        CSRF token is invalid (code=-111).  The caller must refresh
+        credentials.
+    """
+    params: dict[str, object] = {
+        "uid1": sender_uid,
+        "uid2": receiver_id,
+        "build": 0,
+        "mobi_app": "web",
+    }
+
+    try:
+        result: dict = await client.get(  # type: ignore[union-attr]
+            _PM_SESSION_URL, params=params
+        )
+    except CSRFError:
+        raise  # fatal — caller must refresh credentials
+    except AuthError:
+        logger.warning("check_session_detail: auth expired")
+        return False
+
+    data = result.get("data")
+    if data and isinstance(data, dict) and len(data) > 0:
+        return True
     return False
