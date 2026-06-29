@@ -33,12 +33,14 @@ class Fetcher:
     polling.
     """
 
-    __slots__ = ("_client", "reply_cursor", "at_cursor")
+    __slots__ = ("_client", "reply_cursor", "at_cursor", "reply_is_end", "at_is_end")
 
     def __init__(self, client: BiliHTTPClient) -> None:
         self._client = client
         self.reply_cursor: tuple[int | None, float | None] = (None, None)
         self.at_cursor: tuple[int | None, float | None] = (None, None)
+        self.reply_is_end: bool = True
+        self.at_is_end: bool = True
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -123,9 +125,17 @@ class Fetcher:
         cursor: dict = data.get("cursor") if isinstance(data.get("cursor"), dict) else {}  # type: ignore[assignment]
         cursor_id = cursor.get("id")
         cursor_time = cursor.get("time")
+        is_end = bool(cursor.get("is_end", True))
 
-        # Persist cursor for caller to save
+        # Persist cursor and is_end for caller
         self._set_cursor(source, cursor_id, cursor_time)
+        if source == "at":
+            self.at_is_end = is_end
+        else:
+            self.reply_is_end = is_end
+
+        # Time-key in the item dict is "reply_time" for reply, "at_time" for at
+        msg_time_key = "at_time" if source == "at" else "reply_time"
 
         now = time.time()
         tasks: list[dict] = []
@@ -136,6 +146,7 @@ class Fetcher:
 
             user: dict = item.get("user") if isinstance(item.get("user"), dict) else {}  # type: ignore[assignment]
             detail: dict = item.get("item") if isinstance(item.get("item"), dict) else {}  # type: ignore[assignment]
+            msg_time_raw = item.get(msg_time_key, 0)
 
             tasks.append(
                 {
@@ -148,6 +159,7 @@ class Fetcher:
                     "subject_id": detail.get("subject_id", 0),
                     "root_id": _zero_to_none(detail.get("root_id")),
                     "source_id": _zero_to_none(detail.get("source_id")),
+                    "msg_time": float(msg_time_raw) if msg_time_raw else 0.0,
                     "status": "pending",
                     "created_at": now,
                     "processed_at": None,

@@ -53,6 +53,7 @@ _TASK_COLUMNS: tuple[str, ...] = (
     "subject_id",
     "root_id",
     "source_id",
+    "msg_time",
     "status",
     "created_at",
     "processed_at",
@@ -101,6 +102,7 @@ async def init_db(db_path: str | Path) -> None:
                     subject_id      INTEGER NOT NULL,
                     root_id         INTEGER,
                     source_id       INTEGER,
+                    msg_time        REAL    NOT NULL DEFAULT 0.0,
                     status          TEXT    NOT NULL DEFAULT 'pending',
                     created_at      REAL    NOT NULL,
                     processed_at    REAL,
@@ -116,6 +118,7 @@ async def init_db(db_path: str | Path) -> None:
 
             _ensure_column(conn, "tasks", "classification_result", "TEXT")
             _ensure_column(conn, "tasks", "skill_result", "TEXT")
+            _ensure_column(conn, "tasks", "msg_time", "REAL NOT NULL DEFAULT 0.0")
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS cursor_state (
@@ -139,7 +142,9 @@ async def insert_task(task: dict[str, Any]) -> bool:
     def _insert() -> bool:
         conn = sqlite3.connect(_get_db(), check_same_thread=False)
         try:
-            # Build ordered values from known columns only
+            # Ensure msg_time has a default so NOT NULL constraint is satisfied
+            if task.get("msg_time") is None:
+                task["msg_time"] = 0.0
             values = tuple(task.get(col) for col in _TASK_COLUMNS)
             placeholders = ", ".join("?" for _ in _TASK_COLUMNS)
             columns_sql = ", ".join(_TASK_COLUMNS)
@@ -376,3 +381,20 @@ async def set_cursor(source: str, cursor_id: int, cursor_time: float) -> None:
             conn.close()
 
     await asyncio.to_thread(_set)
+
+
+async def task_exists(msg_id: int, source: str) -> bool:
+    """Return ``True`` if a task with *msg_id* and *source* already exists."""
+
+    def _check() -> bool:
+        conn = sqlite3.connect(_get_db(), check_same_thread=False)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM tasks WHERE msg_id = ? AND source = ?",
+                (msg_id, source),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(_check)

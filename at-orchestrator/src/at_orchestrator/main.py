@@ -8,6 +8,7 @@ import json
 import os
 import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from at_orchestrator import __version__
@@ -46,6 +47,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # fetch
     p_fetch = sub.add_parser("fetch", help="Fetch new @ messages from Bilibili")
+    p_fetch.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        choices=["reply", "at"],
+        help='Only fetch one source type: "reply" or "at" (default: both)',
+    )
+    p_fetch.add_argument(
+        "--after-date",
+        type=str,
+        default=None,
+        metavar="DATE",
+        help="Only fetch messages after this date (ISO 8601, default: yesterday 00:00 local time)",
+    )
     p_fetch.set_defaults(_handler="fetch")
 
     # process (Phase 1: classification)
@@ -173,37 +188,93 @@ async def _handle_fetch(args: argparse.Namespace) -> None:
         os.makedirs(Path(args.db_path).parent, exist_ok=True)
         await at_db.init_db(args.db_path)
 
-        # Read cursors from previous fetch for incremental polling
-        reply_cursor = await at_db.get_cursor("reply")
-        at_cursor = await at_db.get_cursor("at")
+        if args.after_date:
+            after_ts = _parse_after_date(args.after_date)
+        else:
+            # Default: yesterday at midnight local time
+            yesterday = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            after_ts = (yesterday - timedelta(days=1)).timestamp()
 
         fetcher = Fetcher(client)
-        reply_tasks = await fetcher.fetch_reply_messages(
-            cursor_id=reply_cursor[0] if reply_cursor else None,
-            cursor_time=reply_cursor[1] if reply_cursor else None,
-        )
-        at_tasks = await fetcher.fetch_at_messages(
-            cursor_id=at_cursor[0] if at_cursor else None,
-            cursor_time=at_cursor[1] if at_cursor else None,
-        )
+        total = 0
 
-        # Save cursors for next incremental fetch
-        r_cid, r_ctime = fetcher.reply_cursor
-        a_cid, a_ctime = fetcher.at_cursor
-        if r_cid is not None and r_ctime is not None:
-            await at_db.set_cursor("reply", r_cid, r_ctime)
-        if a_cid is not None and a_ctime is not None:
-            await at_db.set_cursor("at", a_cid, a_ctime)
+        if args.source in (None, "reply"):
+            total += await _fetch_pages(
+                fetcher, source="reply", db_path=args.db_path, after_ts=after_ts
+            )
 
-        all_tasks = reply_tasks + at_tasks
-        inserted = 0
-        for task in all_tasks:
+        if args.source in (None, "at"):
+            total += await _fetch_pages(
+                fetcher, source="at", db_path=args.db_path, after_ts=after_ts
+            )
+
+        print(f"拉取完成: 新增 {total} 条")
+    finally:
+        await client.close()
+
+
+async def _fetch_pages(
+    fetcher: object,
+    *,
+    source: str,
+    db_path: str,
+    after_ts: float | None,
+) -> int:
+    """Loop through API pages for *source*, breaking on dedup or is_end."""
+    cursor = await at_db.get_cursor(source)
+    cursor_id: int | None = cursor[0] if cursor else None
+    cursor_time: float | None = cursor[1] if cursor else None
+    inserted = 0
+
+    while True:
+        if source == "at":
+            tasks = await fetcher.fetch_at_messages(cursor_id, cursor_time)  # type: ignore[union-attr]
+            is_end = fetcher.at_is_end  # type: ignore[union-attr]
+        else:
+            tasks = await fetcher.fetch_reply_messages(cursor_id, cursor_time)  # type: ignore[union-attr]
+            is_end = fetcher.reply_is_end  # type: ignore[union-attr]
+
+        if not tasks:
+            break
+
+        # Dedup: if first msg already in DB, we've caught up to known data
+        first_mid = tasks[0].get("msg_id")
+        if isinstance(first_mid, int) and await at_db.task_exists(first_mid, source):
+            break
+
+        # After-date local filter
+        if after_ts is not None:
+            tasks = [t for t in tasks if float(t.get("msg_time", 0)) >= after_ts]
+
+        for task in tasks:
             if await at_db.insert_task(task):
                 inserted += 1
 
-        print(f"拉取完成: {len(all_tasks)} 条消息, 新增 {inserted} 条")
-    finally:
-        await client.close()
+        # Advance cursor from the fetcher's parsed state
+        if source == "at":
+            cur = fetcher.at_cursor  # type: ignore[union-attr]
+        else:
+            cur = fetcher.reply_cursor  # type: ignore[union-attr]
+        cid, ctime = cur
+        if cid is not None and ctime is not None:
+            await at_db.set_cursor(source, cid, ctime)
+        cursor_id, cursor_time = cid, ctime
+
+        if is_end:
+            break
+
+    return inserted
+
+
+def _parse_after_date(date_str: str) -> float:
+    """Parse an ISO 8601 date string to a Unix timestamp.
+
+    Accepts formats like ``2026-06-30`` or ``2026-06-30T00:00:00+08:00``.
+    """
+    dt = datetime.fromisoformat(date_str)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
 
 
 async def _handle_process(args: argparse.Namespace) -> None:

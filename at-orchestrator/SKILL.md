@@ -108,13 +108,30 @@ result = bash("uv run at-orchestrator process --apply-llm-result /tmp/llm-output
 ### fetch — 拉取 @ 消息
 
 ```bash
-# 拉取新 @ 消息（自动游标分页，增量拉取）
+# 拉取新消息（自动游标分页 + 增量循环拉取）
 uv run at-orchestrator fetch
+
+# 只拉取回复通知，不拉取 @消息
+uv run at-orchestrator fetch --source reply
+
+# 只拉取 @消息
+uv run at-orchestrator fetch --source at
+
+# 只拉取指定日期之后的消息
+uv run at-orchestrator fetch --after-date 2026-06-30
+uv run at-orchestrator fetch --after-date "2026-06-30T00:00:00+08:00"
 ```
 
-从 B站 API `x/msgfeed/at` 和 `x/msgfeed/reply` 拉取新的 @ 消息和回复通知，自动存储到 SQLite 数据库。首次拉取仅取最新页，后续增量拉取。
+从 B站 API `x/msgfeed/at` 和 `x/msgfeed/reply` 拉取新的 @ 消息和回复通知，自动存储到 SQLite 数据库。
 
-每条提取到的消息生成一个 LLM 分类 prompt，输出到 stdout。
+**增量拉取机制**：每次 `fetch` 会循环翻页，逐页入库。遇到以下条件之一自动停止：
+- 当前页第一条消息已在库中（dedup 断点）
+- API 返回 `cursor.is_end: true`（已到末尾）
+
+| 参数 | 说明 |
+|------|------|
+| `--source reply\|at` | 只拉取一种来源，默认两者都拉 |
+| `--after-date DATE` | 只拉取该日期之后的消息（ISO 8601，默认昨天 00:00 本地时间） |
 
 ### process — 处理消息
 
