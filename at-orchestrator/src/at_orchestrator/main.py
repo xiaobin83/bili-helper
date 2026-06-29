@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import os
+import sqlite3
 import sys
+from pathlib import Path
 
 from at_orchestrator import __version__
+from at_orchestrator import db as at_db
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -80,6 +85,136 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# ── Async handlers ──────────────────────────────────────────────────────
+
+
+async def _handle_fetch(args: argparse.Namespace) -> None:
+    """Fetch new @ and reply messages from Bilibili, store in DB."""
+    from bili_core.auth import get_credentials
+    from bili_core.http_client import BiliHTTPClient
+    from at_orchestrator.fetcher import Fetcher
+
+    creds = get_credentials(env_prefix=args.env_prefix)
+    client = BiliHTTPClient(
+        sessdata=creds.sessdata,
+        bili_jct=creds.bili_jct,
+        buvid3=creds.buvid3,
+    )
+    try:
+        os.makedirs(Path(args.db_path).parent, exist_ok=True)
+        await at_db.init_db(args.db_path)
+
+        fetcher = Fetcher(client)
+        reply_tasks = await fetcher.fetch_reply_messages()
+        at_tasks = await fetcher.fetch_at_messages()
+
+        all_tasks = reply_tasks + at_tasks
+        inserted = 0
+        for task in all_tasks:
+            if await at_db.insert_task(task):
+                inserted += 1
+
+        print(f"拉取完成: {len(all_tasks)} 条消息, 新增 {inserted} 条")
+    finally:
+        await client.close()
+
+
+async def _handle_process(args: argparse.Namespace) -> None:
+    """Process pending AT tasks through the full pipeline."""
+    from bili_core.auth import get_credentials
+    from bili_core.http_client import BiliHTTPClient
+    from at_orchestrator.processor import Processor
+
+    # Resolve --apply-llm-result: "-" for stdin, existing path for file, else inline
+    llm_result: str | None = None
+    if args.apply_llm_result is not None:
+        if args.apply_llm_result == "-":
+            llm_result = sys.stdin.read()
+        elif Path(args.apply_llm_result).exists():
+            llm_result = Path(args.apply_llm_result).read_text(encoding="utf-8")
+        else:
+            llm_result = args.apply_llm_result
+
+    creds = get_credentials(env_prefix=args.env_prefix)
+    client = BiliHTTPClient(
+        sessdata=creds.sessdata,
+        bili_jct=creds.bili_jct,
+        buvid3=creds.buvid3,
+    )
+    try:
+        os.makedirs(Path(args.db_path).parent, exist_ok=True)
+        await at_db.init_db(args.db_path)
+        processor = Processor(client=client, sender_uid=creds.mid)
+        results = await processor.process_pending(
+            limit=args.limit,
+            dry_run=args.dry_run,
+            llm_result=llm_result,
+        )
+        for r in results:
+            status = r["status"]
+            msg_id = r["msg_id"]
+            error = r.get("error")
+            if error:
+                print(f"[{status}] msg_id={msg_id}, error={error}")
+            else:
+                print(f"[{status}] msg_id={msg_id}")
+    finally:
+        await client.close()
+
+
+async def _handle_status(args: argparse.Namespace) -> None:
+    """Show task status counts from the database."""
+    os.makedirs(Path(args.db_path).parent, exist_ok=True)
+    await at_db.init_db(args.db_path)
+
+    def _query_counts() -> tuple[dict[str, int], int]:
+        conn = sqlite3.connect(args.db_path, check_same_thread=False)
+        try:
+            total = conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0]
+            rows = conn.execute(
+                "SELECT status, COUNT(*) as cnt FROM tasks GROUP BY status"
+            ).fetchall()
+            return {r[0]: r[1] for r in rows}, total
+        finally:
+            conn.close()
+
+    counts, total = await asyncio.to_thread(_query_counts)
+
+    other = (
+        total
+        - counts.get("pending", 0)
+        - counts.get("replied", 0)
+        - counts.get("failed", 0)
+    )
+    print(f"pending:  {counts.get('pending', 0)}")
+    print(f"replied:  {counts.get('replied', 0)}")
+    print(f"failed:   {counts.get('failed', 0)}")
+    print(f"other:    {other}")
+    print(f"total:    {total}")
+
+
+async def _handle_reset(args: argparse.Namespace) -> None:
+    """Drop and recreate all tables."""
+    await asyncio.to_thread(_drop_tables, args.db_path)
+    os.makedirs(Path(args.db_path).parent, exist_ok=True)
+    await at_db.init_db(args.db_path)
+    print(f"数据库已重置: {args.db_path}")
+
+
+def _drop_tables(db_path: str) -> None:
+    """Drop tasks and cursor_state tables."""
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    try:
+        conn.execute("DROP TABLE IF EXISTS tasks")
+        conn.execute("DROP TABLE IF EXISTS cursor_state")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── Entry point ─────────────────────────────────────────────────────────
+
+
 def main(argv: list[str] | None = None) -> None:
     """CLI entry point."""
     parser = _build_parser()
@@ -88,17 +223,13 @@ def main(argv: list[str] | None = None) -> None:
     handler = getattr(args, "_handler", None)
 
     if handler == "fetch":
-        print(f"fetch: not yet implemented")
+        asyncio.run(_handle_fetch(args))
     elif handler == "process":
-        print(
-            f"process: limit={args.limit}, "
-            f"dry_run={args.dry_run}, "
-            f"apply_llm={args.apply_llm_result}"
-        )
+        asyncio.run(_handle_process(args))
     elif handler == "status":
-        print(f"status: not yet implemented")
+        asyncio.run(_handle_status(args))
     elif handler == "reset":
-        print(f"reset: not yet implemented")
+        asyncio.run(_handle_reset(args))
 
 
 if __name__ == "__main__":

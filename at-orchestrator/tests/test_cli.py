@@ -3,15 +3,15 @@
 TDD: these tests are written BEFORE the implementation.
 Run once to see them fail, then implement main.py to make them pass.
 
-NOTE: main()'s argv parameter expects args *without* the program name
-(i.e. sys.argv[1:] equivalent). So call main(["status"]) not main(["prog", "status"]).
+NOTE: Tests verify argument *parsing* only — they do NOT execute handlers
+(which would require B站 credentials or a real database).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from at_orchestrator.main import main
+from at_orchestrator.main import _build_parser, main
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -23,29 +23,40 @@ class TestGlobalArgs:
     """Global arguments: --db-path, --auth-file, --env-prefix."""
 
     def test_default_db_path(self) -> None:
-        """--db-path defaults to '.at-orchestrator/tasks.db' (parsing succeeds)."""
-        main(["--db-path", ".at-orchestrator/tasks.db", "status"])
+        """--db-path defaults to '.at-orchestrator/tasks.db'."""
+        parser = _build_parser()
+        args = parser.parse_args(["--db-path", ".at-orchestrator/tasks.db", "status"])
+        assert args.db_path == ".at-orchestrator/tasks.db"
 
     def test_custom_db_path(self) -> None:
         """--db-path should accept a custom path (parsing succeeds)."""
-        main(["--db-path", "/tmp/test.db", "status"])
+        parser = _build_parser()
+        args = parser.parse_args(["--db-path", "/tmp/test.db", "status"])
+        assert args.db_path == "/tmp/test.db"
 
     def test_auth_file(self) -> None:
         """--auth-file should be accepted (parsing succeeds)."""
-        main(["--auth-file", "/tmp/auth.json", "status"])
+        parser = _build_parser()
+        args = parser.parse_args(["--auth-file", "/tmp/auth.json", "status"])
+        assert args.auth_file == "/tmp/auth.json"
 
     def test_default_env_prefix(self) -> None:
         """--env-prefix defaults to 'BILI_' (parsing succeeds)."""
-        main(["--env-prefix", "BILI_", "status"])
+        parser = _build_parser()
+        args = parser.parse_args(["--env-prefix", "BILI_", "status"])
+        assert args.env_prefix == "BILI_"
 
     def test_custom_env_prefix(self) -> None:
         """--env-prefix should accept a custom prefix (parsing succeeds)."""
-        main(["--env-prefix", "MY_", "status"])
+        parser = _build_parser()
+        args = parser.parse_args(["--env-prefix", "MY_", "status"])
+        assert args.env_prefix == "MY_"
 
     def test_version(self, capsys: pytest.CaptureFixture[str]) -> None:
         """--version should print version and exit."""
+        parser = _build_parser()
         with pytest.raises(SystemExit, match="0"):
-            main(["--version"])
+            parser.parse_args(["--version"])
         captured = capsys.readouterr()
         assert "at-orchestrator" in captured.out
 
@@ -58,12 +69,12 @@ class TestGlobalArgs:
 class TestFetch:
     """fetch subcommand — no additional args."""
 
-    def test_fetch_routes(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """fetch should print a stub message."""
-        main(["fetch"])
-        captured = capsys.readouterr()
-        assert "fetch" in captured.out
-        assert "not yet implemented" in captured.out.lower()
+    def test_fetch_subcommand(self) -> None:
+        """fetch should be recognized by the parser."""
+        parser = _build_parser()
+        args = parser.parse_args(["fetch"])
+        assert args.command == "fetch"
+        assert args._handler == "fetch"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -74,56 +85,48 @@ class TestFetch:
 class TestProcess:
     """process subcommand — --limit, --dry-run, --apply-llm-result."""
 
-    def test_process_routes(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """process should print a stub message with default values."""
-        main(["process"])
-        captured = capsys.readouterr()
-        assert "process" in captured.out.lower()
-        assert "limit=1" in captured.out
-        assert "dry_run=False" in captured.out or "dry-run:" in captured.out
+    def test_process_defaults(self) -> None:
+        """process should have correct default values."""
+        parser = _build_parser()
+        args = parser.parse_args(["process"])
+        assert args.limit == 1
+        assert args.dry_run is False
+        assert args.apply_llm_result is None
 
-    def test_process_limit(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """--limit should be accepted."""
-        main(["process", "--limit", "5"])
-        captured = capsys.readouterr()
-        assert "limit=5" in captured.out
+    def test_process_limit(self) -> None:
+        """--limit should be parsed correctly."""
+        parser = _build_parser()
+        args = parser.parse_args(["process", "--limit", "5"])
+        assert args.limit == 5
 
-    def test_process_dry_run(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_process_dry_run(self) -> None:
         """--dry-run should set dry_run to True."""
-        main(["process", "--dry-run"])
-        captured = capsys.readouterr()
-        assert "dry_run=True" in captured.out or "dry-run" in captured.out.lower()
+        parser = _build_parser()
+        args = parser.parse_args(["process", "--dry-run"])
+        assert args.dry_run is True
 
-    def test_process_apply_llm_result(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_process_apply_llm_result(self) -> None:
         """--apply-llm-result should accept a file path."""
-        main(["process", "--apply-llm-result", "result.json"])
-        captured = capsys.readouterr()
-        assert "result.json" in captured.out
+        parser = _build_parser()
+        args = parser.parse_args(["process", "--apply-llm-result", "result.json"])
+        assert args.apply_llm_result == "result.json"
 
-    def test_process_combined_args(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_process_combined_args(self) -> None:
         """process should accept all args together."""
-        main([
-            "process",
-            "--limit", "10",
-            "--dry-run",
-            "--apply-llm-result", "/tmp/out.json",
-        ])
-        captured = capsys.readouterr()
-        assert "limit=10" in captured.out
-        assert "dry_run=True" in captured.out or "dry-run" in captured.out.lower()
-        assert "/tmp/out.json" in captured.out
-
-    def test_process_limit_default(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """--limit should default to 1."""
-        main(["process"])
-        captured = capsys.readouterr()
-        assert "limit=1" in captured.out
-
-    def test_process_apply_llm_default_none(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """--apply-llm-result should be None by default."""
-        main(["process"])
-        captured = capsys.readouterr()
-        assert "None" in captured.out
+        parser = _build_parser()
+        args = parser.parse_args(
+            [
+                "process",
+                "--limit",
+                "10",
+                "--dry-run",
+                "--apply-llm-result",
+                "/tmp/out.json",
+            ]
+        )
+        assert args.limit == 10
+        assert args.dry_run is True
+        assert args.apply_llm_result == "/tmp/out.json"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -134,12 +137,12 @@ class TestProcess:
 class TestStatus:
     """status subcommand — no additional args."""
 
-    def test_status_routes(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """status should print a stub message."""
-        main(["status"])
-        captured = capsys.readouterr()
-        assert "status" in captured.out
-        assert "not yet implemented" in captured.out.lower()
+    def test_status_subcommand(self) -> None:
+        """status should be recognized by the parser."""
+        parser = _build_parser()
+        args = parser.parse_args(["status"])
+        assert args.command == "status"
+        assert args._handler == "status"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -150,17 +153,18 @@ class TestStatus:
 class TestReset:
     """reset subcommand — requires --force."""
 
-    def test_reset_with_force(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """reset --force should print a stub message."""
-        main(["reset", "--force"])
-        captured = capsys.readouterr()
-        assert "reset" in captured.out
-        assert "not yet implemented" in captured.out.lower()
+    def test_reset_with_force(self) -> None:
+        """reset --force should be accepted by the parser."""
+        parser = _build_parser()
+        args = parser.parse_args(["reset", "--force"])
+        assert args.command == "reset"
+        assert args.force is True
 
     def test_reset_requires_force(self) -> None:
         """reset without --force should error."""
+        parser = _build_parser()
         with pytest.raises(SystemExit, match="2"):
-            main(["reset"])
+            parser.parse_args(["reset"])
 
 
 # ──────────────────────────────────────────────────────────────────────
