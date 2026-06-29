@@ -1,9 +1,11 @@
 """Message classifier — LLM prompt builder and result parser.
 
 Provides:
-- ``build_classification_prompt()``: Builds an LLM prompt to classify an AT message
-  into one of 3 skills (video-analyzer, watch-later-recommender, unknown).
-- ``parse_llm_result()``: Extracts and validates JSON from an LLM text response.
+- ``build_classification_prompt()``: Builds an LLM prompt from a single task.
+- ``build_batch_classification_prompt()``: Builds a batch prompt from
+  multiple tasks (the recommended flow).
+- ``parse_llm_result()``: Extracts and validates JSON (array or single
+  object) from an LLM text response.
 """
 
 from __future__ import annotations
@@ -25,11 +27,46 @@ _BUSINESS_CONTEXT_MAP: dict[int, str] = {
 }
 
 # ──────────────────────────────────────────────────────────────────────
-# Classification prompt template
+# Classification prompt template (batch)
 # ──────────────────────────────────────────────────────────────────────
 
-_CLASSIFICATION_PROMPT = """你是 B站 at-orchestrator 消息分类助手。
-请将以下 @ 消息分类到最匹配的技能。
+_BATCH_CLASSIFICATION_PROMPT = """你是 B站 at-orchestrator 消息分类助手。
+请将以下消息逐条分类到最匹配的技能。
+
+可用技能：
+- video-analyzer: 询问视频详情、分析视频内容
+- watch-later-recommender: 推荐视频、稍后再看推荐
+- unknown: 无法匹配以上任何技能
+
+每条消息都需要分类，按顺序输出分类结果数组。
+
+Few-shot 示例（消息列表 → 分类数组）：
+消息：
+<message id=1001 source=at>分析这个视频BV1xx</message>
+<message id=1002 source=reply>今天天气不错</message>
+
+输出：
+[
+{{"msg_id": 1001, "skill_name": "video-analyzer", "params": {{"bvid": "BV1xx"}}, "confidence": 0.95, "reason": "用户明确要求分析视频"}},
+{{"msg_id": 1002, "skill_name": "unknown", "params": {{}}, "confidence": 0.95, "reason": "与B站功能无关的闲聊消息"}}
+]
+
+现在请分类以下 {task_count} 条消息：
+{messages_block}
+
+业务上下文：{business_context}
+
+请只输出 JSON 数组，不要额外文字。
+每条输出格式：
+{{"msg_id": ..., "skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}"""
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Single-task prompt builder (legacy)
+# ──────────────────────────────────────────────────────────────────────
+
+_SINGLE_CLASSIFICATION_PROMPT = """你是 B站 at-orchestrator 消息分类助手。
+请将以下消息分类到最匹配的技能。
 
 可用技能：
 - video-analyzer: 询问视频详情、分析视频内容
@@ -37,36 +74,31 @@ _CLASSIFICATION_PROMPT = """你是 B站 at-orchestrator 消息分类助手。
 - unknown: 无法匹配以上任何技能
 
 Few-shot 示例：
-1. 消息(id=1001, source=at): "分析这个视频BV1xx"
-   输出: {{"msg_id": 1001, "skill_name": "video-analyzer", "params": {{"bvid": "BV1xx"}}, "confidence": 0.95, "reason": "用户明确要求分析视频"}}
+消息：
+<message id=1001 source=at>分析这个视频BV1xx</message>
 
-2. 消息(id=1002, source=reply): "今天天气不错"
-   输出: {{"msg_id": 1002, "skill_name": "unknown", "params": {{}}, "confidence": 0.95, "reason": "与B站功能无关的闲聊消息"}}
+输出：
+[{{"msg_id": 1001, "skill_name": "video-analyzer", "params": {{"bvid": "BV1xx"}}, "confidence": 0.95, "reason": "用户明确要求分析视频"}}]
 
 现在请分类以下消息：
 <message id={msg_id} source={source}>{content}</message>
 
 业务上下文：{business_context}
 
-请只输出 JSON，不要额外文字。
-使用以下格式：
+请只输出 JSON 数组，不要额外文字。
+每条格式：
 {{"msg_id": ..., "skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}"""
 
 
 def build_classification_prompt(task_dict: dict[str, Any]) -> str:
-    """Build an LLM classification prompt from a task dictionary.
+    """Build an LLM classification prompt from a single task dictionary.
 
     Args:
-        task_dict: Dict with ``msg_id`` (int), ``source`` (str),
-                   ``content`` (user message text) and ``business_id``
-                   (int context identifier).
+        task_dict: Dict with ``msg_id``, ``source``, ``content`` and
+                   ``business_id``.
 
     Returns:
-        Formatted prompt string ready for LLM consumption.
-
-    The prompt includes skill descriptions, 2 few-shot examples,
-    user content wrapped in ``<message id=.. source=..>...</message>``
-    tags for injection protection, and business context.
+        Formatted prompt string expecting a JSON array output.
     """
     msg_id = task_dict.get("msg_id", 0)
     source = task_dict.get("source", "unknown")
@@ -75,10 +107,45 @@ def build_classification_prompt(task_dict: dict[str, Any]) -> str:
 
     business_context = _BUSINESS_CONTEXT_MAP.get(business_id, f"未知业务 (ID: {business_id})")
 
-    return _CLASSIFICATION_PROMPT.format(
+    return _SINGLE_CLASSIFICATION_PROMPT.format(
         msg_id=msg_id,
         source=source,
         content=content,
+        business_context=business_context,
+    )
+
+
+def build_batch_classification_prompt(tasks: list[dict[str, Any]]) -> str:
+    """Build an LLM classification prompt from multiple tasks.
+
+    Args:
+        tasks: List of task dicts, each with ``msg_id``, ``source``,
+               ``content``, and ``business_id``.
+
+    Returns:
+        Formatted prompt string expecting a JSON array output with one
+        entry per input message.
+    """
+    # Build messages block
+    lines: list[str] = []
+    contexts: set[str] = set()
+    for t in tasks:
+        msg_id = t.get("msg_id", 0)
+        source = t.get("source", "unknown")
+        content = t.get("content", "")
+        lines.append(
+            f"<message id={msg_id} source={source}>{content}</message>"
+        )
+        business_id = t.get("business_id", 0)
+        ctx = _BUSINESS_CONTEXT_MAP.get(business_id, f"未知业务 (ID: {business_id})")
+        contexts.add(ctx)
+
+    messages_block = "\n".join(lines)
+    business_context = ", ".join(sorted(contexts)) if contexts else "未知"
+
+    return _BATCH_CLASSIFICATION_PROMPT.format(
+        task_count=len(tasks),
+        messages_block=messages_block,
         business_context=business_context,
     )
 
@@ -87,56 +154,48 @@ def build_classification_prompt(task_dict: dict[str, Any]) -> str:
 # JSON extraction
 # ──────────────────────────────────────────────────────────────────────
 
-# Regex to match `` ```json ... ``` `` or `` ``` ... ``` `` fences.
+# Regex for ```json ... ``` and ``` ... ``` fences.
 _FENCE_RE = re.compile(r"```(?:json)?\s*\n?(.*?)\n?```", re.DOTALL)
 
-# Regex to match outermost ``{ ... }`` as a fallback when no fences.
-_BARE_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+# Regex for outermost { ... } or [ ... ] as fallback.
+_BARE_JSON_RE = re.compile(r"(\[.*\]|\{.*\})", re.DOTALL)
 
 
 def _extract_json_text(text: str) -> str | None:
-    """Extract a JSON object string from LLM output text.
+    """Extract a JSON string (array or object) from LLM output text.
 
-    Tries `` ```json ... ``` `` fences first, then falls back to raw
-    ``{ ... }`` boundaries.
-
-    Args:
-        text: Raw LLM response text.
-
-    Returns:
-        Raw JSON string on success, ``None`` if nothing found.
+    Tries ```json/``` fences first, then falls back to raw [{...}] or
+    {...} boundaries.
     """
     # Prefer ```json / ``` code fences
     m = _FENCE_RE.search(text)
     if m:
         candidate = m.group(1).strip()
-        if candidate.startswith("{"):
+        if candidate.startswith("{") or candidate.startswith("["):
             return candidate
 
-    # Fallback: find outermost { ... }
+    # Fallback: find outermost [...] or {...}
     m = _BARE_JSON_RE.search(text)
     if m:
-        return m.group(0)
+        return m.group(1)
 
     return None
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Validation
+# Per-entry validation
 # ──────────────────────────────────────────────────────────────────────
 
-def _validate_classification(data: dict[str, Any]) -> dict[str, Any] | None:
-    """Validate and normalize a parsed classification dict.
 
-    Returns a clean dict with the 4 required keys (skill_name, params,
-    confidence, reason) plus optional ``msg_id`` when present, or
-    ``None`` if the data fails structural or value validation.
+def _validate_classification(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Validate and normalize a single classification dict.
+
+    Returns a clean dict with the 4 required keys plus optional
+    ``msg_id``, or ``None`` if validation fails.
     """
-    # Must be a dict
     if not isinstance(data, dict):
         return None
 
-    # Required keys
     required_keys = {"skill_name", "params", "confidence", "reason"}
     if not required_keys.issubset(data.keys()):
         return None
@@ -146,22 +205,15 @@ def _validate_classification(data: dict[str, Any]) -> dict[str, Any] | None:
     confidence = data["confidence"]
     reason = data["reason"]
 
-    # Validate skill_name
     if not isinstance(skill_name, str) or skill_name not in VALID_SKILLS:
         return None
-
-    # Validate params is a dict
     if not isinstance(params, dict):
         return None
-
-    # Validate confidence is a float in [0, 1]
     if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
         return None
     confidence = float(confidence)
     if confidence < 0.0 or confidence > 1.0:
         return None
-
-    # Validate reason is a non-empty string
     if not isinstance(reason, str):
         return None
 
@@ -172,7 +224,6 @@ def _validate_classification(data: dict[str, Any]) -> dict[str, Any] | None:
         "reason": reason,
     }
 
-    # Preserve msg_id when present (for mapping back to the task)
     msg_id = data.get("msg_id")
     if msg_id is not None:
         result["msg_id"] = msg_id
@@ -185,21 +236,24 @@ def _validate_classification(data: dict[str, Any]) -> dict[str, Any] | None:
 # ──────────────────────────────────────────────────────────────────────
 
 
-def parse_llm_result(llm_text: str) -> dict[str, Any] | None:
-    """Extract and validate a classification result from LLM text output.
+def parse_llm_result(llm_text: str) -> list[dict[str, Any]] | None:
+    """Extract and validate classification results from LLM text output.
+
+    The LLM is expected to return a JSON array of classification objects,
+    one per input message.  A single JSON object is also accepted
+    (wrapped into a list for backward compatibility).
 
     Args:
-        llm_text: Raw text response from an LLM (expected to contain JSON).
+        llm_text: Raw text response from an LLM.
 
     Returns:
-        A dict with keys ``skill_name``, ``params``, ``confidence``,
-        ``reason`` on success, or ``None`` if no valid JSON was found or
-        the data fails validation.
+        A list of validated classification dicts (each with keys
+        ``skill_name``, ``params``, ``confidence``, ``reason``, and
+        optionally ``msg_id``), or ``None`` if no valid JSON was found.
 
-    The function handles:
-    - `` ```json ... ``` `` and `` ``` ... ``` `` code fences
-    - bare ``{ ... }`` JSON blocks
-    - multi-line JSON (via ``re.DOTALL``)
+    Invalid entries are silently filtered out.  If the LLM returns a
+    single object instead of an array, it is wrapped into a single-element
+    list.
     """
     json_str = _extract_json_text(llm_text)
     if json_str is None:
@@ -210,4 +264,19 @@ def parse_llm_result(llm_text: str) -> dict[str, Any] | None:
     except (json.JSONDecodeError, ValueError):
         return None
 
-    return _validate_classification(data)
+    # Normalise to list
+    items: list[Any]
+    if isinstance(data, list):
+        items = data
+    elif isinstance(data, dict):
+        items = [data]
+    else:
+        return None
+
+    validated: list[dict[str, Any]] = []
+    for item in items:
+        v = _validate_classification(item)
+        if v is not None:
+            validated.append(v)
+
+    return validated if validated else None

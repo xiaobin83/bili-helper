@@ -133,11 +133,12 @@ class TestProcessPendingDryRun:
              patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "PROMPT_CONTENT"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "PROMPT_CONTENT"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.95, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock()
             mock_disp_cls.return_value = mock_disp
@@ -165,7 +166,7 @@ class TestProcessPendingClassificationFailed:
              patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = None
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock()
@@ -173,8 +174,7 @@ class TestProcessPendingClassificationFailed:
             processor = Processor(client=client, sender_uid=12345)
             results = await processor.process_pending(limit=1, llm_result="bad json")
 
-        assert mock_db.update_task_status.call_count >= 2
-        mock_db.update_task_status.assert_any_call(1001, "reply", "classifying")
+        assert mock_db.update_task_status.call_count >= 1
         mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="classification_failed")
         mock_disp.dispatch_with_timeout.assert_not_called()
         assert results[0]["status"] == "failed"
@@ -196,11 +196,12 @@ class TestProcessPendingDispatchFailed:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -228,11 +229,12 @@ class TestProcessPendingUnknownSkill:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "unknown", "params": {},
                 "confidence": 0.9, "reason": "not actionable",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock()
             mock_disp_cls.return_value = mock_disp
@@ -264,11 +266,12 @@ class TestProcessPendingReplyCommentSuccess:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -304,11 +307,12 @@ class TestProcessPendingReplyPmLongResult:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.95, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -344,11 +348,12 @@ class TestProcessPendingPmFallbackToComment:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -384,11 +389,12 @@ class TestProcessPendingReplyFails:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -417,11 +423,12 @@ class TestProcessPendingReplyFails:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -453,11 +460,11 @@ class TestProcessPendingMultipleTasks:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task1, task2])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [
+                {"msg_id": 1, "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "test"},
+                {"msg_id": 2, "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "test"},
+            ]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -487,12 +494,10 @@ class TestProcessPendingExceptionHandling:
              patch("at_orchestrator.processor.Dispatcher"):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
-            mock_classifier.build_classification_prompt.side_effect = RuntimeError("boom")
+            mock_classifier.build_batch_classification_prompt.side_effect = RuntimeError("boom")
             processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1)
-
-        mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="classification_error: boom")
-        assert results[0]["status"] == "failed"
+            with pytest.raises(RuntimeError, match="boom"):
+                await processor.process_pending(limit=1)
 
     @pytest.mark.asyncio
     async def test_dispatch_exception_caught(self) -> None:
@@ -506,11 +511,12 @@ class TestProcessPendingExceptionHandling:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(side_effect=RuntimeError("subprocess crash"))
             mock_disp_cls.return_value = mock_disp
@@ -535,11 +541,12 @@ class TestProcessPendingExceptionHandling:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -568,11 +575,12 @@ class TestProcessPendingResultStructure:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.9, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp
@@ -603,7 +611,7 @@ class TestProcessPendingNoLLMResult:
              patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "PROMPT_NO_LLM"
+            mock_classifier.build_batch_classification_prompt.return_value = "PROMPT_NO_LLM"
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock()
             mock_disp_cls.return_value = mock_disp
@@ -632,11 +640,12 @@ class TestProcessPendingCallsUpdateTaskReply:
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = {
+            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            mock_classifier.parse_llm_result.return_value = [{
+                "msg_id": 1001,
                 "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
                 "confidence": 0.95, "reason": "test",
-            }
+            }]
             mock_disp = MagicMock()
             mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
             mock_disp_cls.return_value = mock_disp

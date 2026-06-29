@@ -3,7 +3,7 @@
 Tests the full pipeline (pending → classifying → dispatching → replying →
 replied) with real SQLite and ALL external dependencies mocked:
 
-- ``classifier.build_classification_prompt`` / ``parse_llm_result``
+- ``classifier.build_batch_classification_prompt`` / ``parse_llm_result``
 - ``Dispatcher.dispatch_with_timeout``
 - ``replier.reply_comment`` / ``reply_pm`` / ``check_session_detail``
 
@@ -148,12 +148,12 @@ class TestFullSuccessPath:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=classification,
+                return_value=[{**classification, "msg_id": 1001}],
             ),
             patch(
                 "at_orchestrator.processor.replier.reply_comment",
@@ -207,7 +207,7 @@ class TestClassificationFailure:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
@@ -263,12 +263,12 @@ class TestReplyFailure:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=classification,
+                return_value=[{**classification, "msg_id": 1001}],
             ),
             patch(
                 "at_orchestrator.processor.replier.reply_comment",
@@ -311,12 +311,12 @@ class TestReplyFailure:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=classification,
+                return_value=[{**classification, "msg_id": 1001}],
             ),
         ):
             processor = Processor(
@@ -367,12 +367,16 @@ class TestBatchProcessing:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=classification,
+                return_value=[
+                    {**classification, "msg_id": 1},
+                    {**classification, "msg_id": 2},
+                    {**classification, "msg_id": 3},
+                ],
             ),
             patch(
                 "at_orchestrator.processor.replier.reply_comment",
@@ -424,24 +428,18 @@ class TestBatchProcessing:
             return_value=_make_dispatch_result(stdout="ok")
         )
 
-        # Track call count for parse_llm_result so task 2 returns None
-        call_count = 0
-
-        def _parse_side_effect(llm_text: str) -> dict | None:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 2:
-                return None  # task 2 fails classification
-            return classification
-
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                side_effect=_parse_side_effect,
+                # msg_id=2 intentionally absent → "no_classification_in_llm_output"
+                return_value=[
+                    {**classification, "msg_id": 1},
+                    {**classification, "msg_id": 3},
+                ],
             ),
             patch(
                 "at_orchestrator.processor.replier.reply_comment",
@@ -463,10 +461,10 @@ class TestBatchProcessing:
         assert results[0]["msg_id"] == 1
         assert results[0]["status"] == "replied"
 
-        # Task 2: failed (classification)
+        # Task 2: failed (no classification in LLM output)
         assert results[1]["msg_id"] == 2
         assert results[1]["status"] == "failed"
-        assert results[1]["error"] == "classification_failed"
+        assert results[1]["error"] == "no_classification_in_llm_output"
 
         # Task 3: replied
         assert results[2]["msg_id"] == 3
@@ -478,7 +476,7 @@ class TestBatchProcessing:
 
         row2 = await _get_task_row(str(tmp_db_path), 2, "reply")
         assert row2["status"] == "failed"
-        assert row2["reply_error"] == "classification_failed"
+        assert row2["reply_error"] == "no_classification_in_llm_output"
 
         row3 = await _get_task_row(str(tmp_db_path), 3, "reply")
         assert row3["status"] == "replied"
@@ -502,12 +500,16 @@ class TestBatchProcessing:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=classification,
+                return_value=[
+                    {**classification, "msg_id": 1},
+                    {**classification, "msg_id": 2},
+                    {**classification, "msg_id": 3},
+                ],
             ),
             patch(
                 "at_orchestrator.processor.replier.reply_comment",
@@ -555,12 +557,12 @@ class TestPMReplyPath:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=classification,
+                return_value=[{**classification, "msg_id": 1001}],
             ),
             patch(
                 "at_orchestrator.processor.replier.check_session_detail",
@@ -609,12 +611,12 @@ class TestUnknownSkill:
 
         with (
             patch(
-                "at_orchestrator.processor.classifier.build_classification_prompt",
+                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
                 return_value="fixed prompt",
             ),
             patch(
                 "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=classification,
+                return_value=[{**classification, "msg_id": 1001}],
             ),
         ):
             processor = Processor(

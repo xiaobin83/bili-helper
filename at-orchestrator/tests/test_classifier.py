@@ -104,9 +104,9 @@ class TestBuildClassificationPrompt:
         content = "DISREGARD_PREVIOUS_INSTRUCTIONS"
         task = {"msg_id": 99, "source": "at", "content": content, "business_id": 1}
         prompt = build_classification_prompt(task)
-        # Find the message tag boundaries
-        msg_start = prompt.index("<message")
-        msg_end = prompt.index("</message>") + len("</message>")
+        # Find the LAST message tag boundaries (prompt has few-shot examples with <message>)
+        msg_start = prompt.rindex("<message")
+        msg_end = prompt.rindex("</message>") + len("</message>")
         before_msg = prompt[:msg_start]
         after_msg = prompt[msg_end:]
         assert content not in before_msg
@@ -131,22 +131,22 @@ class TestParseLLMResultJsonFences:
 ```
 
 This is the result."""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "video-analyzer"
-        assert result["params"] == {"bvid": "BV1xx"}
-        assert result["confidence"] == 0.95
-        assert result["reason"] == "用户要求分析视频"
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "video-analyzer"
+        assert results[0]["params"] == {"bvid": "BV1xx"}
+        assert results[0]["confidence"] == 0.95
+        assert results[0]["reason"] == "用户要求分析视频"
 
     def test_extracts_from_generic_code_fence(self) -> None:
         """``` without json specifier should also work."""
         llm_text = """```
 {"skill_name": "watch-later-recommender", "params": {"topic": "AI"}, "confidence": 0.9, "reason": "用户请求推荐"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "watch-later-recommender"
-        assert result["params"] == {"topic": "AI"}
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "watch-later-recommender"
+        assert results[0]["params"] == {"topic": "AI"}
 
     def test_newlines_inside_json_fence(self) -> None:
         """JSON with newlines inside the fence should parse correctly (re.DOTALL)."""
@@ -160,11 +160,11 @@ This is the result."""
   "reason": "用户想分析视频"
 }
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "video-analyzer"
-        assert result["params"] == {"bvid": "BV1xx"}
-        assert result["confidence"] == 0.95
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "video-analyzer"
+        assert results[0]["params"] == {"bvid": "BV1xx"}
+        assert results[0]["confidence"] == 0.95
 
     def test_multiple_json_blocks_uses_first_fence(self) -> None:
         """When multiple JSON blocks exist, first ```json fence wins."""
@@ -175,25 +175,25 @@ Some more text...
 ```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.1, "reason": "fallback"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "video-analyzer"
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "video-analyzer"
 
     def test_conf_in_fence_range(self) -> None:
         llm_text = """```json
 {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0, "reason": "no confidence"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["confidence"] == 0.0
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["confidence"] == 0.0
 
     def test_high_conf_in_fence(self) -> None:
         llm_text = """```json
 {"skill_name": "video-analyzer", "params": {}, "confidence": 1.0, "reason": "full"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["confidence"] == 1.0
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["confidence"] == 1.0
 
 
 class TestParseLLMResultBareJSON:
@@ -201,19 +201,19 @@ class TestParseLLMResultBareJSON:
 
     def test_extracts_bare_json(self) -> None:
         llm_text = """Classification result: {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "分析视频"} Done."""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "video-analyzer"
-        assert result["params"] == {"bvid": "BV1xx"}
-        assert result["confidence"] == 0.9
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "video-analyzer"
+        assert results[0]["params"] == {"bvid": "BV1xx"}
+        assert results[0]["confidence"] == 0.9
 
     def test_extracts_bare_json_with_surrounding_noise(self) -> None:
         llm_text = "Sure! Here you go:\n\n{\"skill_name\": \"unknown\", \"params\": {}, \"confidence\": 0.2, \"reason\": \"无法分类\"}\n\nHope that helps!"
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "unknown"
-        assert result["params"] == {}
-        assert result["confidence"] == 0.2
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "unknown"
+        assert results[0]["params"] == {}
+        assert results[0]["confidence"] == 0.2
 
     def test_bare_json_with_newlines_inside(self) -> None:
         """Bare JSON with internal newlines should still be found (re.DOTALL)."""
@@ -225,109 +225,109 @@ class TestParseLLMResultBareJSON:
   "reason": "not sure"
 }
 End."""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "unknown"
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "unknown"
 
 
 class TestParseLLMResultErrors:
     """parse_llm_result — returns None on invalid input."""
 
     def test_returns_none_when_no_json(self) -> None:
-        result = parse_llm_result("This is just plain text with no JSON at all.")
-        assert result is None
+        results = parse_llm_result("This is just plain text with no JSON at all.")
+        assert results is None
 
     def test_returns_none_when_empty_string(self) -> None:
-        result = parse_llm_result("")
-        assert result is None
+        results = parse_llm_result("")
+        assert results is None
 
     def test_returns_none_when_truncated_json(self) -> None:
-        result = parse_llm_result('{"skill_name": "video-analyzer", "params": {')
-        assert result is None
+        results = parse_llm_result('{"skill_name": "video-analyzer", "params": {')
+        assert results is None
 
     def test_returns_none_when_invalid_json_in_fence(self) -> None:
         llm_text = """```json
 {invalid json content here}}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_not_a_dict(self) -> None:
         llm_text = """```json
 ["skill_name", "params"]
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_json_is_just_number(self) -> None:
         llm_text = "42"
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_missing_required_key(self) -> None:
         """Missing 'skill_name' key should cause validation failure."""
         llm_text = """```json
 {"params": {}, "confidence": 0.5, "reason": "missing skill_name"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_missing_params(self) -> None:
         """Missing 'params' key should cause validation failure."""
         llm_text = """```json
 {"skill_name": "unknown", "confidence": 0.5, "reason": "missing params"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_missing_confidence(self) -> None:
         """Missing 'confidence' key should cause validation failure."""
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "reason": "missing confidence"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_missing_reason(self) -> None:
         """Missing 'reason' key should cause validation failure."""
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.5}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_invalid_skill_name(self) -> None:
         llm_text = """```json
 {"skill_name": "non-existent-skill", "params": {}, "confidence": 0.5, "reason": "bad"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_confidence_out_of_range(self) -> None:
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 1.5, "reason": "too high"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_conf_negative_in_bare(self) -> None:
         llm_text = """{"skill_name": "unknown", "params": {}, "confidence": -0.5, "reason": "negative"}"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_params_not_dict(self) -> None:
         llm_text = """```json
 {"skill_name": "unknown", "params": "not a dict", "confidence": 0.5, "reason": "bad params"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
     def test_returns_none_when_reason_not_string(self) -> None:
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.5, "reason": 123}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is None
+        results = parse_llm_result(llm_text)
+        assert results is None
 
 
 class TestParseLLMResultEdgeCases:
@@ -337,25 +337,25 @@ class TestParseLLMResultEdgeCases:
         llm_text = """```json
 {"skill_name": "video-analyzer", "params": {}, "confidence": 0.9, "reason": "分析"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["params"] == {}
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["params"] == {}
 
     def test_confidence_as_float_zero(self) -> None:
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.0, "reason": "zero"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["confidence"] == 0.0
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["confidence"] == 0.0
 
     def test_confidence_as_float_one(self) -> None:
         llm_text = """```json
 {"skill_name": "video-analyzer", "params": {"bvid": "x"}, "confidence": 1.0, "reason": "certain"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["confidence"] == 1.0
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["confidence"] == 1.0
 
     def test_handles_nested_params(self) -> None:
         llm_text = """```json
@@ -366,17 +366,17 @@ class TestParseLLMResultEdgeCases:
   "reason": "多层参数推荐"
 }
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["params"] == {"topic": "AI", "count": 5, "target": "toview"}
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["params"] == {"topic": "AI", "count": 5, "target": "toview"}
 
     def test_handles_chinese_text_in_reason(self) -> None:
         llm_text = """```json
 {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.92, "reason": "用户明确要求分析视频BV1xx的内容"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert "明确要求" in result["reason"]
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert "明确要求" in results[0]["reason"]
 
     def test_code_fence_with_spaces_before_json(self) -> None:
         llm_text = """```json
@@ -384,9 +384,9 @@ class TestParseLLMResultEdgeCases:
     
 {"skill_name": "unknown", "params": {}, "confidence": 0.3, "reason": "blank lines before"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "unknown"
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "unknown"
 
     def test_text_before_fence_ignored(self) -> None:
         llm_text = """I've thought about this carefully and determined that:
@@ -396,17 +396,17 @@ class TestParseLLMResultEdgeCases:
 ```
 
 Let me know if you need adjustments!"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "video-analyzer"
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "video-analyzer"
 
     def test_only_json_fence_no_other_text(self) -> None:
         llm_text = """```json
 {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.85, "reason": "仅JSON"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["skill_name"] == "video-analyzer"
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["skill_name"] == "video-analyzer"
 
 
 class TestParseLLMResultDictStructure:
@@ -416,58 +416,58 @@ class TestParseLLMResultDictStructure:
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.5, "reason": "test"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert set(result.keys()) == {"skill_name", "params", "confidence", "reason"}
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert set(results[0].keys()) == {"skill_name", "params", "confidence", "reason"}
 
     def test_params_is_dict(self) -> None:
         llm_text = """```json
 {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "test"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert isinstance(result["params"], dict)
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert isinstance(results[0]["params"], dict)
 
     def test_confidence_is_float(self) -> None:
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.5, "reason": "test"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert isinstance(result["confidence"], float)
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert isinstance(results[0]["confidence"], float)
 
     def test_reason_is_string(self) -> None:
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.5, "reason": "reasonable"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert isinstance(result["reason"], str)
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert isinstance(results[0]["reason"], str)
 
     def test_skill_name_is_string(self) -> None:
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.5, "reason": "test"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert isinstance(result["skill_name"], str)
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert isinstance(results[0]["skill_name"], str)
 
     def test_extra_keys_are_allowed(self) -> None:
         """Extra keys in LLM output should not cause failure."""
         llm_text = """```json
 {"skill_name": "unknown", "params": {}, "confidence": 0.5, "reason": "test", "extra_field": "ignored"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
+        results = parse_llm_result(llm_text)
+        assert results is not None
         # Extra field is in the raw dict but our validated dict should only have the expected keys
-        assert set(result.keys()) == {"skill_name", "params", "confidence", "reason"}
+        assert set(results[0].keys()) == {"skill_name", "params", "confidence", "reason"}
 
     def test_msg_id_is_preserved_when_present(self) -> None:
         """When LLM includes msg_id in output, it should be preserved."""
         llm_text = """```json
 {"msg_id": 1001, "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "分析视频"}
 ```"""
-        result = parse_llm_result(llm_text)
-        assert result is not None
-        assert result["msg_id"] == 1001
-        assert result["skill_name"] == "video-analyzer"
+        results = parse_llm_result(llm_text)
+        assert results is not None
+        assert results[0]["msg_id"] == 1001
+        assert results[0]["skill_name"] == "video-analyzer"
