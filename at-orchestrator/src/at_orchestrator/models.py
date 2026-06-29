@@ -63,7 +63,10 @@ class TaskStatus(str, Enum):
 
     pending = "pending"
     classifying = "classifying"
+    classified = "classified"
     dispatching = "dispatching"
+    prompting = "prompting"
+    pending_reply = "pending_reply"
     replying = "replying"
     replied = "replied"
     failed = "failed"

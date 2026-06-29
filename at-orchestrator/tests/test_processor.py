@@ -1,8 +1,4 @@
-"""Tests for at_orchestrator.processor — the pipeline orchestrator.
-
-TDD: these tests are written BEFORE the implementation.
-Run once to see them fail (ImportError), then implement processor.py.
-"""
+"""Tests for at_orchestrator.processor — the 3-phase pipeline orchestrator."""
 
 from __future__ import annotations
 
@@ -56,609 +52,666 @@ def _make_dispatch_result(
 
 class TestDecideReplyMethod:
 
-    def _call(self, dispatch_result: dict, task: dict) -> str:
+    def _call(self, reply_content: str, task: dict) -> str:
         from at_orchestrator.processor import _decide_reply_method
-        return _decide_reply_method(dispatch_result, task)
+        return _decide_reply_method(reply_content, task)
 
-    def test_short_stdout_with_subject_id_returns_comment(self) -> None:
-        result = _make_dispatch_result(stdout="short output")
+    def test_short_content_with_subject_id_returns_comment(self) -> None:
         task = _make_task(subject_id=12345)
-        assert self._call(result, task) == "comment"
+        assert self._call("short output", task) == "comment"
 
-    def test_long_stdout_returns_pm(self) -> None:
-        result = _make_dispatch_result(stdout="x" * 300)
+    def test_long_content_returns_pm(self) -> None:
         task = _make_task(subject_id=12345)
-        assert self._call(result, task) == "pm"
+        assert self._call("x" * 300, task) == "pm"
 
     def test_exactly_200_chars_returns_pm(self) -> None:
-        result = _make_dispatch_result(stdout="x" * 200)
         task = _make_task(subject_id=12345)
-        assert self._call(result, task) == "pm"
+        assert self._call("x" * 200, task) == "pm"
 
     def test_199_chars_with_subject_id_returns_comment(self) -> None:
-        result = _make_dispatch_result(stdout="x" * 199)
         task = _make_task(subject_id=12345)
-        assert self._call(result, task) == "comment"
+        assert self._call("x" * 199, task) == "comment"
 
-    def test_short_stdout_no_subject_id_returns_pm(self) -> None:
-        result = _make_dispatch_result(stdout="short")
+    def test_short_content_no_subject_id_returns_pm(self) -> None:
         task = _make_task(subject_id=0)
-        assert self._call(result, task) == "pm"
+        assert self._call("short", task) == "pm"
 
-    def test_empty_stdout_with_subject_id_returns_comment(self) -> None:
-        result = _make_dispatch_result(stdout="")
+    def test_empty_content_with_subject_id_returns_comment(self) -> None:
         task = _make_task(subject_id=12345)
-        assert self._call(result, task) == "comment"
-
-    def test_stdout_field_missing_returns_pm(self) -> None:
-        result = {"skill": "video-analyzer", "exit_code": 0}
-        task = _make_task(subject_id=12345)
-        assert self._call(result, task) == "pm"
+        assert self._call("", task) == "comment"
 
 
-class TestProcessPendingEmptyQueue:
+# ══════════════════════════════════════════════════════════════════════
+# Phase 1: process_classification
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestProcessClassificationEmpty:
+    """process_classification — handles empty queue."""
 
     @pytest.mark.asyncio
     async def test_no_pending_tasks_returns_empty(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
         with patch("at_orchestrator.processor.db") as mock_db:
             mock_db.get_pending_tasks = AsyncMock(return_value=[])
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1)
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(limit=1)
         assert results == []
 
     @pytest.mark.asyncio
     async def test_respects_limit_parameter(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
         with patch("at_orchestrator.processor.db") as mock_db:
             mock_db.get_pending_tasks = AsyncMock(return_value=[])
-            processor = Processor(client=client, sender_uid=12345)
-            await processor.process_pending(limit=5)
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            await processor.process_classification(limit=5)
             mock_db.get_pending_tasks.assert_called_once_with(5)
 
 
-class TestProcessPendingDryRun:
+class TestProcessClassificationDryRun:
+    """process_classification — dry run prints prompt, skips DB."""
 
     @pytest.mark.asyncio
     async def test_dry_run_prints_prompt_and_skips(self, capsys: pytest.CaptureFixture[str]) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
         task = _make_task()
         llm_json = _make_llm_result_json("video-analyzer", bvid="BV1xx")
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "PROMPT_CONTENT"
             mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.95, "reason": "test",
+                "msg_id": 1001, "skill_name": "video-analyzer",
+                "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "test",
             }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock()
-            mock_disp_cls.return_value = mock_disp
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1, dry_run=True, llm_result=llm_json)
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(
+                limit=1, dry_run=True, llm_result=llm_json
+            )
 
         captured = capsys.readouterr()
         assert "PROMPT_CONTENT" in captured.out
-        mock_disp.dispatch_with_timeout.assert_not_called()
         mock_db.update_task_status.assert_not_called()
         assert len(results) == 1
         assert results[0]["status"] == "classifying"
 
 
-class TestProcessPendingClassificationFailed:
+class TestProcessClassificationNoLLMResult:
+    """process_classification — no LLM result prints prompt, marks classifying."""
+
+    @pytest.mark.asyncio
+    async def test_no_llm_result_prints_prompt(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from at_orchestrator.processor import Processor
+        task = _make_task()
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
+            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_classifier.build_batch_classification_prompt.return_value = "PROMPT_NO_LLM"
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(limit=1, llm_result=None)
+
+        captured = capsys.readouterr()
+        assert "PROMPT_NO_LLM" in captured.out
+        assert results[0]["status"] == "classifying"
+
+
+class TestProcessClassificationFailed:
+    """process_classification — invalid LLM output marks tasks as failed."""
 
     @pytest.mark.asyncio
     async def test_classification_failed_mark_as_failed(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
         task = _make_task()
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = None
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock()
-            mock_disp_cls.return_value = mock_disp
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1, llm_result="bad json")
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(limit=1, llm_result="bad json")
 
-        assert mock_db.update_task_status.call_count >= 1
         mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="classification_failed")
-        mock_disp.dispatch_with_timeout.assert_not_called()
         assert results[0]["status"] == "failed"
         assert results[0]["error"] == "classification_failed"
 
 
-class TestProcessPendingDispatchFailed:
+class TestProcessClassificationUnknownSkill:
+    """process_classification — unknown skill skips to replied."""
 
     @pytest.mark.asyncio
-    async def test_dispatch_failed_mark_as_failed(self) -> None:
+    async def test_unknown_skill_mark_replied(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
         task = _make_task()
-        dispatch_result = _make_dispatch_result(exit_code=1, error="non-zero exit code 1")
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
-
-        mock_db.update_task_status.assert_any_call(1001, "reply", "dispatching")
-        mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="non-zero exit code 1")
-        assert results[0]["status"] == "failed"
-        assert "exit code 1" in results[0]["error"]
-
-
-class TestProcessPendingUnknownSkill:
-
-    @pytest.mark.asyncio
-    async def test_unknown_skill_skips_dispatch(self) -> None:
-        from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task()
-
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
-            mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "unknown", "params": {},
+                "msg_id": 1001, "skill_name": "unknown", "params": {},
                 "confidence": 0.9, "reason": "not actionable",
             }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock()
-            mock_disp_cls.return_value = mock_disp
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("unknown"))
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(
+                limit=1, llm_result=_make_llm_result_json("unknown")
+            )
 
-        mock_disp.dispatch_with_timeout.assert_not_called()
-        mock_db.update_task_status.assert_any_call(1001, "reply", "classifying")
         mock_db.update_task_status.assert_any_call(1001, "reply", "replied")
         mock_db.update_task_reply.assert_called_with(1001, "reply", "none")
         assert results[0]["status"] == "replied"
         assert results[0]["reply_method"] == "none"
 
 
-class TestProcessPendingReplyCommentSuccess:
+class TestProcessClassificationSuccess:
+    """process_classification — successful classification writes to DB."""
 
     @pytest.mark.asyncio
-    async def test_comment_reply_success(self) -> None:
+    async def test_classify_to_classified(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task(subject_id=12345, root_id=50, source_id=60)
-        dispatch_result = _make_dispatch_result(skill="video-analyzer", stdout="分析完成")
+        import json as _json
+        task = _make_task()
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
+            mock_db.update_classification = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
+                "msg_id": 1001, "skill_name": "video-analyzer",
+                "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "test",
             }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            mock_replier.reply_comment = AsyncMock(return_value=True)
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(
+                limit=1, llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx")
+            )
 
-        mock_replier.reply_comment.assert_called_once()
-        args = mock_replier.reply_comment.call_args
-        assert args[0][0] is client
-        assert args[0][1] == task
-        assert args[0][2] == "分析完成"
-        mock_db.update_task_status.assert_any_call(1001, "reply", "replied")
-        mock_db.update_task_reply.assert_called_with(1001, "reply", "comment")
-        assert results[0]["status"] == "replied"
-        assert results[0]["reply_method"] == "comment"
-
-
-class TestProcessPendingReplyPmLongResult:
+        mock_db.update_classification.assert_called_once()
+        assert results[0]["status"] == "classified"
 
     @pytest.mark.asyncio
-    async def test_pm_reply_success(self) -> None:
+    async def test_missing_msg_id_in_llm_output(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task(user_mid=99999, subject_id=12345)
-        dispatch_result = _make_dispatch_result(skill="video-analyzer", stdout="x" * 500)
+        task = _make_task(msg_id=9999)
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
+            # LLM output has msg_id=1001 but task has msg_id=9999
             mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.95, "reason": "test",
+                "msg_id": 1001, "skill_name": "video-analyzer",
+                "params": {}, "confidence": 0.9, "reason": "test",
             }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            mock_replier.check_session_detail = AsyncMock(return_value=True)
-            mock_replier.reply_pm = AsyncMock(return_value=True)
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(
+                limit=1, llm_result=_make_llm_result_json("video-analyzer")
+            )
 
-        mock_replier.check_session_detail.assert_called_once_with(client, 12345, 99999)
-        mock_replier.reply_pm.assert_called_once_with(client, 12345, 99999, "x" * 500)
-        mock_replier.reply_comment.assert_not_called()
-        mock_db.update_task_status.assert_any_call(1001, "reply", "replied")
-        mock_db.update_task_reply.assert_called_with(1001, "reply", "pm")
-        assert results[0]["status"] == "replied"
-        assert results[0]["reply_method"] == "pm"
-
-
-class TestProcessPendingPmFallbackToComment:
-
-    @pytest.mark.asyncio
-    async def test_pm_fallback_to_truncated_comment(self) -> None:
-        from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task(subject_id=12345, user_mid=99999)
-        long_stdout = "x" * 500
-        dispatch_result = _make_dispatch_result(skill="video-analyzer", stdout=long_stdout)
-
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
-            mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            mock_replier.check_session_detail = AsyncMock(return_value=False)
-            mock_replier.reply_comment = AsyncMock(return_value=True)
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
-
-        mock_replier.reply_pm.assert_not_called()
-        mock_replier.reply_comment.assert_called_once()
-        reply_content = mock_replier.reply_comment.call_args[0][2]
-        assert len(reply_content) <= 1001
-        mock_db.update_task_status.assert_any_call(1001, "reply", "replied")
-        mock_db.update_task_reply.assert_called_with(1001, "reply", "comment")
-        assert results[0]["status"] == "replied"
-        assert results[0]["reply_method"] == "comment"
-
-
-class TestProcessPendingReplyFails:
-
-    @pytest.mark.asyncio
-    async def test_comment_reply_fails(self) -> None:
-        from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task(subject_id=12345)
-        dispatch_result = _make_dispatch_result(stdout="short")
-
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
-            mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            mock_replier.reply_comment = AsyncMock(return_value=False)
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
-
-        calls = [c[0] for c in mock_db.update_task_status.call_args_list]
-        assert (1001, "reply", "replying") in calls
-        assert (1001, "reply", "failed") in calls
         assert results[0]["status"] == "failed"
-        assert "reply" in results[0]["error"].lower()
-
-    @pytest.mark.asyncio
-    async def test_pm_and_fallback_both_fail(self) -> None:
-        from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task(subject_id=12345, user_mid=99999)
-        dispatch_result = _make_dispatch_result(stdout="x" * 500)
-
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
-            mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            mock_replier.check_session_detail = AsyncMock(return_value=False)
-            mock_replier.reply_comment = AsyncMock(return_value=False)
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
-
-        mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="reply_failed")
-        assert results[0]["status"] == "failed"
-        assert results[0]["error"] == "reply_failed"
+        assert results[0]["error"] == "no_classification_in_llm_output"
 
 
-class TestProcessPendingMultipleTasks:
+class TestProcessClassificationMultiple:
+    """process_classification — batch processing."""
 
     @pytest.mark.asyncio
     async def test_processes_multiple_tasks(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task1 = _make_task(msg_id=1, subject_id=100)
-        task2 = _make_task(msg_id=2, subject_id=200)
-        dispatch_result = _make_dispatch_result(stdout="short")
+        task1 = _make_task(msg_id=1)
+        task2 = _make_task(msg_id=2)
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task1, task2])
             mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
+            mock_db.update_classification = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = [
                 {"msg_id": 1, "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "test"},
                 {"msg_id": 2, "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.9, "reason": "test"},
             ]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            mock_replier.reply_comment = AsyncMock(return_value=True)
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=10,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_classification(
+                limit=10, llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx")
+            )
 
         assert len(results) == 2
-        assert results[0]["msg_id"] == 1
-        assert results[1]["msg_id"] == 2
-        assert results[0]["status"] == "replied"
-        assert results[1]["status"] == "replied"
-        assert mock_replier.reply_comment.call_count == 2
+        assert results[0]["status"] == "classified"
+        assert results[1]["status"] == "classified"
+        assert mock_db.update_classification.call_count == 2
 
 
-class TestProcessPendingExceptionHandling:
+class TestProcessClassificationBuildPromptException:
+    """process_classification — build prompt exception propagates."""
 
     @pytest.mark.asyncio
     async def test_build_prompt_exception_caught(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
         task = _make_task()
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher"):
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
             mock_db.get_pending_tasks = AsyncMock(return_value=[task])
-            mock_db.update_task_status = AsyncMock()
             mock_classifier.build_batch_classification_prompt.side_effect = RuntimeError("boom")
-            processor = Processor(client=client, sender_uid=12345)
+            processor = Processor(client=MagicMock(), sender_uid=12345)
             with pytest.raises(RuntimeError, match="boom"):
-                await processor.process_pending(limit=1)
+                await processor.process_classification(limit=1)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Phase 2: build_skill_prompts
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestBuildSkillPrompts:
+    """Phase 2a: build_skill_prompts — reads classified tasks, prints prompts."""
 
     @pytest.mark.asyncio
-    async def test_dispatch_exception_caught(self) -> None:
+    async def test_empty_classified_returns_empty(self) -> None:
+        from at_orchestrator.processor import Processor
+        with patch("at_orchestrator.processor.db") as mock_db:
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[])
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.build_skill_prompts(limit=5)
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_prints_prompts_and_sets_prompting(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from at_orchestrator.processor import Processor
+        import json as _json
+        task = _make_task(
+            msg_id=1, source="reply", status="classified",
+            classification_result=_json.dumps({"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}}),
+        )
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_classifier.build_skill_prompt.return_value = "SKILL_PROMPT_MOCK"
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.build_skill_prompts(limit=5)
+
+        captured = capsys.readouterr()
+        assert "SKILL_PROMPT_MOCK" in captured.out
+        assert "msg_id=1" in captured.out
+        mock_db.update_task_status.assert_called_with(1, "reply", "prompting")
+        assert results[0]["status"] == "prompting"
+
+    @pytest.mark.asyncio
+    async def test_handles_missing_classification_result(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from at_orchestrator.processor import Processor
+        task = _make_task(msg_id=1, source="reply", status="classified")
+        # no classification_result key
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_classifier.build_skill_prompt.return_value = "FALLBACK_PROMPT"
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.build_skill_prompts(limit=5)
+
+        assert results[0]["status"] == "prompting"
+
+
+class TestApplySkillResults:
+    """Phase 2b: apply_skill_results — applies LLM output to prompting tasks."""
+
+    @pytest.mark.asyncio
+    async def test_empty_prompting_returns_empty(self) -> None:
+        from at_orchestrator.processor import Processor
+        with patch("at_orchestrator.processor.db") as mock_db:
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[])
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.apply_skill_results(limit=5, llm_result="{}")
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_no_llm_result_returns_empty(self) -> None:
+        from at_orchestrator.processor import Processor
+        task = _make_task(msg_id=1, source="reply", status="prompting")
+        with patch("at_orchestrator.processor.db") as mock_db:
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.apply_skill_results(limit=5, llm_result=None)
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_single_result_applied_to_task(self) -> None:
+        from at_orchestrator.processor import Processor
+        import json as _json
+        task = _make_task(
+            msg_id=1, source="reply", status="prompting",
+            classification_result=_json.dumps({"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}}),
+        )
+        llm_text = _json.dumps({"msg_id": 1, "reply_content": "分析完成", "bvid": "BV1xx"})
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_db.update_skill_result = AsyncMock()
+            mock_classifier._extract_json_text.return_value = None
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.apply_skill_results(limit=5, llm_result=llm_text)
+
+        mock_db.update_skill_result.assert_called_once_with(
+            1, "reply",
+            _json.dumps({"msg_id": 1, "reply_content": "分析完成", "bvid": "BV1xx"}, ensure_ascii=False),
+            "分析完成"
+        )
+        assert results[0]["status"] == "pending_reply"
+
+    @pytest.mark.asyncio
+    async def test_single_result_no_msg_id_applied_to_single_task(self) -> None:
+        from at_orchestrator.processor import Processor
+        import json as _json
+        task = _make_task(
+            msg_id=1, source="reply", status="prompting",
+            classification_result=_json.dumps({"skill_name": "video-analyzer"}),
+        )
+        # LLM output has no msg_id, but only 1 task is prompting
+        llm_text = _json.dumps({"reply_content": "分析完成"})
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_skill_result = AsyncMock()
+            mock_db.update_task_status = AsyncMock()
+            mock_classifier._extract_json_text.return_value = None
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.apply_skill_results(limit=5, llm_result=llm_text)
+
+        assert results[0]["status"] == "pending_reply"
+
+    @pytest.mark.asyncio
+    async def test_no_match_marked_failed(self) -> None:
+        from at_orchestrator.processor import Processor
+        import json as _json
+        task = _make_task(
+            msg_id=1, source="reply", status="prompting",
+            classification_result=_json.dumps({"skill_name": "video-analyzer"}),
+        )
+        # Different msg_id
+        llm_text = _json.dumps([{"msg_id": 999, "reply_content": "x"}])
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.classifier") as mock_classifier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_classifier._extract_json_text.return_value = None
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.apply_skill_results(limit=5, llm_result=llm_text)
+
+        assert results[0]["status"] == "failed"
+        assert results[0]["error"] == "no_skill_result_found"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Phase 3: execute_replies
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestExecuteRepliesEmpty:
+    """Phase 3: execute_replies — handles empty queue."""
+
+    @pytest.mark.asyncio
+    async def test_empty_pending_reply_returns_empty(self) -> None:
+        from at_orchestrator.processor import Processor
+        with patch("at_orchestrator.processor.db") as mock_db:
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[])
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.execute_replies(limit=5)
+        assert results == []
+
+
+class TestExecuteRepliesComment:
+    """Phase 3: execute_replies — comment reply."""
+
+    @pytest.mark.asyncio
+    async def test_comment_reply_success(self) -> None:
         from at_orchestrator.processor import Processor
         client = MagicMock()
-        task = _make_task()
+        task = _make_task(
+            msg_id=1, source="reply", status="pending_reply",
+            subject_id=12345, reply_method="分析完成",
+        )
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.replier") as mock_replier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(side_effect=RuntimeError("subprocess crash"))
-            mock_disp_cls.return_value = mock_disp
+            mock_replier.reply_comment = AsyncMock(return_value=True)
             processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
+            results = await processor.execute_replies(limit=5)
 
-        mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="dispatch_error: subprocess crash")
+        mock_replier.reply_comment.assert_called_once()
+        assert results[0]["status"] == "replied"
+        assert results[0]["reply_method"] == "comment"
+
+    @pytest.mark.asyncio
+    async def test_comment_reply_fails(self) -> None:
+        from at_orchestrator.processor import Processor
+        client = MagicMock()
+        task = _make_task(
+            msg_id=1, source="reply", status="pending_reply",
+            subject_id=12345, reply_method="分析完成",
+        )
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.replier") as mock_replier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_replier.reply_comment = AsyncMock(return_value=False)
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.execute_replies(limit=5)
+
         assert results[0]["status"] == "failed"
+        assert results[0]["error"] == "reply_failed"
+
+
+class TestExecuteRepliesPM:
+    """Phase 3: execute_replies — PM reply."""
+
+    @pytest.mark.asyncio
+    async def test_pm_reply_success(self) -> None:
+        from at_orchestrator.processor import Processor
+        client = MagicMock()
+        long_content = "x" * 500
+        task = _make_task(
+            msg_id=1, source="reply", status="pending_reply",
+            subject_id=12345, user_mid=99999, reply_method=long_content,
+        )
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.replier") as mock_replier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_db.update_task_reply = AsyncMock()
+            mock_replier.check_session_detail = AsyncMock(return_value=True)
+            mock_replier.reply_pm = AsyncMock(return_value=True)
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.execute_replies(limit=5)
+
+        mock_replier.reply_pm.assert_called_once_with(client, 12345, 99999, long_content)
+        assert results[0]["status"] == "replied"
+        assert results[0]["reply_method"] == "pm"
+
+    @pytest.mark.asyncio
+    async def test_pm_fallback_to_comment(self) -> None:
+        from at_orchestrator.processor import Processor
+        client = MagicMock()
+        long_content = "x" * 500
+        task = _make_task(
+            msg_id=1, source="reply", status="pending_reply",
+            subject_id=12345, user_mid=99999, reply_method=long_content,
+        )
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.replier") as mock_replier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
+            mock_db.update_task_status = AsyncMock()
+            mock_db.update_task_reply = AsyncMock()
+            mock_replier.check_session_detail = AsyncMock(return_value=False)
+            mock_replier.reply_comment = AsyncMock(return_value=True)
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.execute_replies(limit=5)
+
+        mock_replier.reply_pm.assert_not_called()
+        mock_replier.reply_comment.assert_called_once()
+        assert results[0]["status"] == "replied"
+        assert results[0]["reply_method"] == "comment"
+
+
+class TestExecuteRepliesException:
+    """Phase 3: execute_replies — exception handling."""
 
     @pytest.mark.asyncio
     async def test_reply_exception_caught(self) -> None:
         from at_orchestrator.processor import Processor
         client = MagicMock()
-        task = _make_task(subject_id=12345)
-        dispatch_result = _make_dispatch_result(stdout="short")
+        task = _make_task(
+            msg_id=1, source="reply", status="pending_reply",
+            subject_id=12345, reply_method="分析完成",
+        )
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.replier") as mock_replier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
             mock_replier.reply_comment = AsyncMock(side_effect=ConnectionError("network down"))
             processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
+            results = await processor.execute_replies(limit=5)
 
-        mock_db.update_task_status.assert_any_call(1001, "reply", "failed", error="reply_exception: network down")
+        mock_db.update_task_status.assert_any_call(1, "reply", "failed", error="reply_exception: network down")
         assert results[0]["status"] == "failed"
 
 
-class TestProcessPendingResultStructure:
+class TestExecuteRepliesMultiple:
+    """Phase 3: execute_replies — batch reply."""
+
+    @pytest.mark.asyncio
+    async def test_processes_multiple_tasks(self) -> None:
+        from at_orchestrator.processor import Processor
+        client = MagicMock()
+        task1 = _make_task(msg_id=1, status="pending_reply", subject_id=100, reply_method="ok")
+        task2 = _make_task(msg_id=2, status="pending_reply", subject_id=200, reply_method="ok")
+
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.replier") as mock_replier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task1, task2])
+            mock_db.update_task_status = AsyncMock()
+            mock_db.update_task_reply = AsyncMock()
+            mock_replier.reply_comment = AsyncMock(return_value=True)
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.execute_replies(limit=5)
+
+        assert len(results) == 2
+        assert results[0]["status"] == "replied"
+        assert results[1]["status"] == "replied"
+
+
+class TestExecuteRepliesResultStructure:
+    """Phase 3: execute_replies — result structure."""
 
     @pytest.mark.asyncio
     async def test_result_has_all_required_keys(self) -> None:
         from at_orchestrator.processor import Processor
         client = MagicMock()
-        task = _make_task(subject_id=12345)
-        dispatch_result = _make_dispatch_result(stdout="short")
+        task = _make_task(
+            msg_id=1, status="pending_reply",
+            subject_id=12345, reply_method="分析完成",
+        )
 
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+        with (
+            patch("at_orchestrator.processor.db") as mock_db,
+            patch("at_orchestrator.processor.replier") as mock_replier,
+        ):
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.9, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
             mock_replier.reply_comment = AsyncMock(return_value=True)
             processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
+            results = await processor.execute_replies(limit=1)
 
         r = results[0]
-        assert r["msg_id"] == 1001
+        assert r["msg_id"] == 1
         assert r["source"] == "reply"
         assert r["status"] == "replied"
         assert r["reply_method"] == "comment"
         assert r["error"] is None
 
 
-class TestProcessPendingNoLLMResult:
+# ══════════════════════════════════════════════════════════════════════
+# Backward compat: process_pending
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestProcessPendingBackwardCompat:
+    """process_pending() — backward-compat wrapper delegates to process_classification."""
 
     @pytest.mark.asyncio
-    async def test_no_llm_result_not_dry_run_prints_prompt_and_skips(self,
-            capsys: pytest.CaptureFixture[str]) -> None:
+    async def test_delegates_to_process_classification(self) -> None:
         from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task()
-
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
-            mock_db.update_task_status = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "PROMPT_NO_LLM"
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock()
-            mock_disp_cls.return_value = mock_disp
-            processor = Processor(client=client, sender_uid=12345)
-            results = await processor.process_pending(limit=1, llm_result=None)
-
-        captured = capsys.readouterr()
-        assert "PROMPT_NO_LLM" in captured.out
-        mock_disp.dispatch_with_timeout.assert_not_called()
-        assert results[0]["status"] == "classifying"
-
-
-class TestProcessPendingCallsUpdateTaskReply:
-
-    @pytest.mark.asyncio
-    async def test_update_task_reply_called_with_pm(self) -> None:
-        from at_orchestrator.processor import Processor
-        client = MagicMock()
-        task = _make_task(user_mid=99999, subject_id=12345)
-        dispatch_result = _make_dispatch_result(stdout="x" * 500)
-
-        with patch("at_orchestrator.processor.db") as mock_db, \
-             patch("at_orchestrator.processor.classifier") as mock_classifier, \
-             patch("at_orchestrator.processor.Dispatcher") as mock_disp_cls, \
-             patch("at_orchestrator.processor.replier") as mock_replier:
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
-            mock_db.update_task_status = AsyncMock()
-            mock_db.update_task_reply = AsyncMock()
-            mock_classifier.build_batch_classification_prompt.return_value = "prompt"
-            mock_classifier.parse_llm_result.return_value = [{
-                "msg_id": 1001,
-                "skill_name": "video-analyzer", "params": {"bvid": "BV1xx"},
-                "confidence": 0.95, "reason": "test",
-            }]
-            mock_disp = MagicMock()
-            mock_disp.dispatch_with_timeout = AsyncMock(return_value=dispatch_result)
-            mock_disp_cls.return_value = mock_disp
-            mock_replier.check_session_detail = AsyncMock(return_value=True)
-            mock_replier.reply_pm = AsyncMock(return_value=True)
-            processor = Processor(client=client, sender_uid=12345)
-            await processor.process_pending(limit=1,
-                llm_result=_make_llm_result_json("video-analyzer", bvid="BV1xx"))
-
-        mock_db.update_task_reply.assert_called_with(1001, "reply", "pm")
+        with patch("at_orchestrator.processor.db") as mock_db:
+            mock_db.get_pending_tasks = AsyncMock(return_value=[])
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.process_pending(limit=5)
+        assert results == []
 
 
 class TestProcessorConstructor:
+    """Processor __init__ — parametrised with client and sender_uid."""
 
     def test_accepts_client_and_sender_uid(self) -> None:
         from at_orchestrator.processor import Processor

@@ -280,3 +280,174 @@ def parse_llm_result(llm_text: str) -> list[dict[str, Any]] | None:
             validated.append(v)
 
     return validated if validated else None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Skill prompt builders (Phase 2)
+# ──────────────────────────────────────────────────────────────────────
+
+_VIDEO_ANALYZER_PROMPT = """你是 B站 视频分析助手。用户请求分析一个B站视频，请执行以下任务：
+
+1. 获取视频详情、热评、高能进度条、AI总结、播放地址等信息
+2. 生成人性化的回复文本，总结视频内容并回应评论者
+
+任务信息：
+- 视频 BV号: {bvid}
+- 用户评论: {content}
+- 用户昵称: {nickname}
+
+请输出两部分：
+1. 回复文本（直接回复给用户的文字，人性化、友好）
+2. JSON 结构化数据
+
+输出格式：
+```
+回复文本：
+{{你的回复内容}}
+
+```json
+{{
+  "reply_content": "回复文本（与上面一致）",
+  "bvid": "{bvid}",
+  "skill": "video-analyzer"
+}}
+```"""
+
+_WATCH_LATER_PROMPT = """你是 B站 视频推荐助手。用户请求推荐视频，请执行以下任务：
+
+1. 根据用户的需求（主题、数量等）从热门和排行中精选视频
+2. 生成推荐回复文本
+
+任务信息：
+- 推荐主题: {topic}
+- 用户评论: {content}
+- 用户昵称: {nickname}
+
+请输出两部分：
+1. 推荐回复文本（告诉用户你推荐了哪些视频）
+2. JSON 结构化数据
+
+输出格式：
+```
+推荐回复：
+{{你的回复内容}}
+
+```json
+{{
+  "reply_content": "推荐回复文本（与上面一致）",
+  "recommended_bvids": ["BV1xx", "BV2xx"],
+  "reasons": ["原因1", "原因2"],
+  "skill": "watch-later-recommender"
+}}
+```"""
+
+_GENERIC_SKILL_PROMPT = """你是 B站 互动助手。用户提出了以下请求，请根据内容生成恰当的回复。
+
+任务信息：
+- 技能: {skill_name}
+- 用户评论: {content}
+- 用户昵称: {nickname}
+
+请输出两部分：
+1. 回复文本（直接回复给用户的文字）
+2. JSON 结构化数据
+
+输出格式：
+```
+回复文本：
+{{你的回复内容}}
+
+```json
+{{
+  "reply_content": "回复文本（与上面一致）",
+  "skill": "{skill_name}"
+}}
+```"""
+
+
+def build_skill_prompt(task_dict: dict[str, Any], classification: dict[str, Any]) -> str:
+    """Build an LLM prompt for a specific skill based on classification.
+
+    Supports ``video-analyzer`` (video analysis) and
+    ``watch-later-recommender`` (video recommendation).  Unknown skills
+    receive a generic prompt.
+
+    Args:
+        task_dict: A task dict with ``content`` and ``user_nickname``.
+        classification: A classification dict with ``skill_name`` and
+                        ``params``.
+
+    Returns:
+        Formatted prompt string instructing the LLM to produce both
+        human-readable reply text and structured JSON data.
+    """
+    skill_name: str = classification.get("skill_name", "unknown")
+    params: dict[str, Any] = classification.get("params", {})
+    content: str = str(task_dict.get("content", ""))
+    nickname: str = str(task_dict.get("user_nickname", "用户"))
+
+    if skill_name == "video-analyzer":
+        bvid = params.get("bvid", "BV1xx")
+        return _VIDEO_ANALYZER_PROMPT.format(
+            bvid=bvid, content=content, nickname=nickname
+        )
+
+    if skill_name == "watch-later-recommender":
+        topic = params.get("topic", content if content else "热门推荐")
+        return _WATCH_LATER_PROMPT.format(
+            topic=topic, content=content, nickname=nickname
+        )
+
+    return _GENERIC_SKILL_PROMPT.format(
+        skill_name=skill_name, content=content, nickname=nickname
+    )
+
+
+def parse_skill_result(skill_name: str, llm_text: str) -> dict[str, Any] | None:
+    """Extract structured skill result from LLM text output.
+
+    Parses the LLM response for a given skill, extracting
+    ``reply_content`` (the text to post as a reply) and any
+    skill-specific structured data.
+
+    Args:
+        skill_name: The skill name (e.g. ``"video-analyzer"``).
+        llm_text: Raw text response from an LLM.
+
+    Returns:
+        A dict with at least ``"reply_content"`` and optionally
+        skill-specific keys like ``"bvid"`` or ``"recommended_bvids"``,
+        or ``None`` if no valid result could be extracted.
+    """
+    json_str = _extract_json_text(llm_text)
+    parsed: dict[str, Any] = {}
+
+    # Try to parse JSON from the output
+    if json_str is not None:
+        try:
+            parsed = json.loads(json_str)
+        except (json.JSONDecodeError, ValueError):
+            parsed = {}
+
+    # Extract reply_content — prefer JSON field, fall back to raw text
+    reply_content = ""
+    if isinstance(parsed.get("reply_content"), str) and parsed["reply_content"].strip():
+        reply_content = parsed["reply_content"]
+    else:
+        reply_content = llm_text.strip()
+
+    result: dict[str, Any] = {
+        "skill": skill_name,
+        "reply_content": reply_content,
+    }
+
+    if skill_name == "video-analyzer":
+        bvid = parsed.get("bvid", "")
+        result["bvid"] = bvid
+    elif skill_name == "watch-later-recommender":
+        bvids = parsed.get("recommended_bvids", [])
+        reasons = parsed.get("reasons", [])
+        result["recommended_bvids"] = bvids if isinstance(bvids, list) else []
+        result["reasons"] = reasons if isinstance(reasons, list) else []
+
+    return result

@@ -6,6 +6,7 @@ Run once to see them fail (ImportError), then implement db.py to make them pass.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,12 @@ import pytest
 from at_orchestrator.db import (
     get_cursor,
     get_pending_tasks,
+    get_tasks_by_status,
     init_db,
     insert_task,
     set_cursor,
+    update_classification,
+    update_skill_result,
     update_task_reply,
     update_task_status,
 )
@@ -84,6 +88,8 @@ class TestInitDb:
         assert "processed_at" in columns
         assert "reply_method" in columns
         assert "reply_error" in columns
+        assert "classification_result" in columns
+        assert "skill_result" in columns
         assert "cursor_id" in columns
         assert "cursor_time" in columns
 
@@ -327,3 +333,95 @@ class TestCursorState:
         r2 = await get_cursor("at")
         assert r1 == (111, 111.0)
         assert r2 == (222, 222.0)
+
+
+class TestGetTasksByStatus:
+    """get_tasks_by_status() — generic status query."""
+
+    async def test_returns_tasks_with_matching_status(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        await insert_task(_make_task(msg_id=1, source="reply", status="pending", created_at=100.0))
+        await insert_task(_make_task(msg_id=2, source="reply", status="classified", created_at=200.0))
+        await insert_task(_make_task(msg_id=3, source="at", status="classified", created_at=150.0))
+
+        tasks = await get_tasks_by_status("classified")
+        assert len(tasks) == 2
+        assert {t["msg_id"] for t in tasks} == {2, 3}
+
+    async def test_returns_empty_when_no_matches(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        await insert_task(_make_task(msg_id=1, source="reply", status="pending"))
+        tasks = await get_tasks_by_status("replied")
+        assert tasks == []
+
+    async def test_respects_limit(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        for i in range(5):
+            await insert_task(_make_task(msg_id=i, source="reply", status="classified", created_at=float(i)))
+        tasks = await get_tasks_by_status("classified", limit=3)
+        assert len(tasks) == 3
+
+    async def test_ordered_by_created_at_asc(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        await insert_task(_make_task(msg_id=10, source="reply", status="classified", created_at=300.0))
+        await insert_task(_make_task(msg_id=11, source="reply", status="classified", created_at=100.0))
+        await insert_task(_make_task(msg_id=12, source="reply", status="classified", created_at=200.0))
+        tasks = await get_tasks_by_status("classified")
+        assert [t["msg_id"] for t in tasks] == [11, 12, 10]
+
+
+class TestUpdateClassification:
+    """update_classification() — writes classification_result, sets status='classified'."""
+
+    async def test_writes_classification_and_status(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        await insert_task(_make_task(msg_id=1, source="reply", status="classifying"))
+        await update_classification(1, "reply", '{"skill_name":"video-analyzer"}')
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            "SELECT status, classification_result FROM tasks WHERE msg_id=1 AND source='reply'"
+        ).fetchone()
+        conn.close()
+        assert row[0] == "classified"
+        assert "video-analyzer" in row[1]
+
+    async def test_sets_processed_at(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        await insert_task(_make_task(msg_id=1, source="reply", status="classifying"))
+        await update_classification(1, "reply", "{}")
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            "SELECT processed_at FROM tasks WHERE msg_id=1 AND source='reply'"
+        ).fetchone()
+        conn.close()
+        assert row[0] is not None
+
+
+class TestUpdateSkillResult:
+    """update_skill_result() — writes skill_result, sets status='pending_reply', stores reply_content."""
+
+    async def test_writes_skill_result_and_status(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        await insert_task(_make_task(msg_id=1, source="reply", status="prompting"))
+        await update_skill_result(1, "reply", '{"bvid":"BV1xx"}', "这是回复内容")
+
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            "SELECT status, skill_result, reply_method FROM tasks WHERE msg_id=1 AND source='reply'"
+        ).fetchone()
+        conn.close()
+        assert row[0] == "pending_reply"
+        assert "BV1xx" in row[1]
+        assert row[2] == "这是回复内容"
+
+    async def test_sets_processed_at(self, tmp_db_path: Path) -> None:
+        await init_db(tmp_db_path)
+        await insert_task(_make_task(msg_id=1, source="reply", status="prompting"))
+        await update_skill_result(1, "reply", "{}", "reply")
+        conn = sqlite3.connect(str(tmp_db_path))
+        row = conn.execute(
+            "SELECT processed_at FROM tasks WHERE msg_id=1 AND source='reply'"
+        ).fetchone()
+        conn.close()
+        assert row[0] is not None

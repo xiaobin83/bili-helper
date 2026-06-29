@@ -58,6 +58,8 @@ _TASK_COLUMNS: tuple[str, ...] = (
     "processed_at",
     "reply_method",
     "reply_error",
+    "classification_result",
+    "skill_result",
     "cursor_id",
     "cursor_time",
 )
@@ -76,6 +78,12 @@ async def init_db(db_path: str | Path) -> None:
     """
     global _db_path
     _db_path = str(db_path)
+
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+        """Add a column to *table* if it does not already exist."""
+        cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
     def _init() -> None:
         conn = sqlite3.connect(_db_path, check_same_thread=False)
@@ -98,11 +106,16 @@ async def init_db(db_path: str | Path) -> None:
                     processed_at    REAL,
                     reply_method    TEXT,
                     reply_error     TEXT,
+                    classification_result  TEXT,
+                    skill_result    TEXT,
                     cursor_id       INTEGER,
                     cursor_time     REAL,
                     UNIQUE(msg_id, source)
                 )
             """)
+
+            _ensure_column(conn, "tasks", "classification_result", "TEXT")
+            _ensure_column(conn, "tasks", "skill_result", "TEXT")
 
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS cursor_state (
@@ -211,6 +224,74 @@ async def update_task_reply(
                 "UPDATE tasks SET reply_method = ?, reply_error = ? "
                 "WHERE msg_id = ? AND source = ?",
                 (reply_method, error, msg_id, source),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    await asyncio.to_thread(_update)
+
+
+async def get_tasks_by_status(status: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Return up to *limit* tasks with the given *status*, ordered by
+    ``created_at`` ASC.
+
+    Returns empty list when no matching tasks exist.
+    """
+
+    def _get() -> list[dict[str, Any]]:
+        conn = sqlite3.connect(_get_db(), check_same_thread=False)
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE status = ? "
+                "ORDER BY created_at ASC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(_get)
+
+
+async def update_classification(
+    msg_id: int, source: str, classification_json: str
+) -> None:
+    """Set ``classification_result`` JSON text and change status to 'classified'."""
+
+    def _update() -> None:
+        conn = sqlite3.connect(_get_db(), check_same_thread=False)
+        try:
+            conn.execute(
+                "UPDATE tasks SET classification_result = ?, status = 'classified', "
+                "processed_at = ? WHERE msg_id = ? AND source = ?",
+                (classification_json, time.time(), msg_id, source),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    await asyncio.to_thread(_update)
+
+
+async def update_skill_result(
+    msg_id: int, source: str, skill_json: str, reply_content: str
+) -> None:
+    """Set ``skill_result`` JSON text and change status to 'pending_reply'.
+
+    The *reply_content* is stored as the ``reply_method`` field for use by
+    the reply phase.
+    """
+
+    def _update() -> None:
+        conn = sqlite3.connect(_get_db(), check_same_thread=False)
+        try:
+            conn.execute(
+                "UPDATE tasks SET skill_result = ?, reply_method = ?, "
+                "status = 'pending_reply', processed_at = ? "
+                "WHERE msg_id = ? AND source = ?",
+                (skill_json, reply_content, time.time(), msg_id, source),
             )
             conn.commit()
         finally:

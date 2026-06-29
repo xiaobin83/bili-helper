@@ -36,7 +36,7 @@ class TestTaskStatus:
         assert TaskStatus.failed.value == "failed"
 
     def test_all_statuses_covered(self) -> None:
-        expected = {"pending", "classifying", "dispatching", "replying", "replied", "failed"}
+        expected = {"pending", "classifying", "classified", "dispatching", "prompting", "pending_reply", "replying", "replied", "failed"}
         assert {s.value for s in TaskStatus} == expected
 
 

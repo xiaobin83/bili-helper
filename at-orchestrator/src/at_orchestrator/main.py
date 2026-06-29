@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sqlite3
 import sys
@@ -47,8 +48,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_fetch = sub.add_parser("fetch", help="Fetch new @ messages from Bilibili")
     p_fetch.set_defaults(_handler="fetch")
 
-    # process
-    p_process = sub.add_parser("process", help="Process pending AT tasks")
+    # process (Phase 1: classification)
+    p_process = sub.add_parser("process", help="Process pending AT tasks (Phase 1: classification)")
     p_process.add_argument(
         "--limit",
         type=int,
@@ -61,13 +62,53 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Preview actions without executing",
     )
     p_process.add_argument(
-        "--apply-llm-result",
+        "--apply-classification-result",
         type=str,
         default=None,
         metavar="FILE",
         help="Apply LLM classification result from file",
     )
+    p_process.add_argument(
+        "--apply-llm-result",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help=argparse.SUPPRESS,
+    )
     p_process.set_defaults(_handler="process")
+
+    # skill-prompt (Phase 2: skill prompt generation/application)
+    p_skill = sub.add_parser(
+        "skill-prompt",
+        help="Build skill prompts or apply LLM skill results (Phase 2)",
+    )
+    p_skill.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of tasks (default: 5)",
+    )
+    p_skill.add_argument(
+        "--apply-skill-result",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Apply LLM skill result from file (Phase 2b)",
+    )
+    p_skill.set_defaults(_handler="skill_prompt")
+
+    # reply (Phase 3: post replies)
+    p_reply = sub.add_parser(
+        "reply",
+        help="Post replies for pending_reply tasks (Phase 3)",
+    )
+    p_reply.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Maximum number of tasks (default: 5)",
+    )
+    p_reply.set_defaults(_handler="reply")
 
     # status
     p_status = sub.add_parser("status", help="Show task status counts")
@@ -86,7 +127,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# ── Async handlers ──────────────────────────────────────────────────────
+# ── Resolve LLM result input ──────────────────────────────────────────
+
+
+def _read_llm_result(arg_value: str | None) -> str | None:
+    if arg_value is None:
+        return None
+    if arg_value == "-":
+        return sys.stdin.read()
+    p = Path(arg_value)
+    if p.exists():
+        return p.read_text(encoding="utf-8")
+    return arg_value
+
+
+# ── Async handlers ────────────────────────────────────────────────────
 
 
 async def _handle_fetch(args: argparse.Namespace) -> None:
@@ -121,20 +176,14 @@ async def _handle_fetch(args: argparse.Namespace) -> None:
 
 
 async def _handle_process(args: argparse.Namespace) -> None:
-    """Process pending AT tasks through the full pipeline."""
+    """Phase 1: Classify pending AT tasks."""
     from bili_core.auth import get_credentials
     from bili_core.http_client import BiliHTTPClient
     from at_orchestrator.processor import Processor
 
-    # Resolve --apply-llm-result: "-" for stdin, existing path for file, else inline
-    llm_result: str | None = None
-    if args.apply_llm_result is not None:
-        if args.apply_llm_result == "-":
-            llm_result = sys.stdin.read()
-        elif Path(args.apply_llm_result).exists():
-            llm_result = Path(args.apply_llm_result).read_text(encoding="utf-8")
-        else:
-            llm_result = args.apply_llm_result
+    llm_result = _read_llm_result(
+        args.apply_classification_result or args.apply_llm_result
+    )
 
     creds = get_credentials(env_prefix=args.env_prefix)
     client = BiliHTTPClient(
@@ -146,7 +195,7 @@ async def _handle_process(args: argparse.Namespace) -> None:
         os.makedirs(Path(args.db_path).parent, exist_ok=True)
         await at_db.init_db(args.db_path)
         processor = Processor(client=client, sender_uid=creds.mid)
-        results = await processor.process_pending(
+        results = await processor.process_classification(
             limit=args.limit,
             dry_run=args.dry_run,
             llm_result=llm_result,
@@ -159,6 +208,66 @@ async def _handle_process(args: argparse.Namespace) -> None:
                 print(f"[{status}] msg_id={msg_id}, error={error}")
             else:
                 print(f"[{status}] msg_id={msg_id}")
+    finally:
+        await client.close()
+
+
+async def _handle_skill_prompt(args: argparse.Namespace) -> None:
+    """Phase 2: Build skill prompts or apply LLM skill results."""
+    from at_orchestrator.processor import Processor
+
+    await at_db.init_db(args.db_path)
+
+    if args.apply_skill_result is not None:
+        llm_result = _read_llm_result(args.apply_skill_result)
+        processor = Processor(client=None, sender_uid=0)
+        results = await processor.apply_skill_results(
+            limit=args.limit, llm_result=llm_result
+        )
+        for r in results:
+            status = r["status"]
+            msg_id = r["msg_id"]
+            error = r.get("error")
+            if error:
+                print(f"[{status}] msg_id={msg_id}, error={error}")
+            else:
+                print(f"[{status}] msg_id={msg_id}")
+    else:
+        processor = Processor(client=None, sender_uid=0)
+        results = await processor.build_skill_prompts(limit=args.limit)
+        if not results:
+            print("No classified tasks found.")
+        else:
+            for r in results:
+                print(f"[{r['status']}] msg_id={r['msg_id']}")
+
+
+async def _handle_reply(args: argparse.Namespace) -> None:
+    """Phase 3: Post replies for pending_reply tasks."""
+    from bili_core.auth import get_credentials
+    from bili_core.http_client import BiliHTTPClient
+    from at_orchestrator.processor import Processor
+
+    creds = get_credentials(env_prefix=args.env_prefix)
+    client = BiliHTTPClient(
+        sessdata=creds.sessdata,
+        bili_jct=creds.bili_jct,
+        buvid3=creds.buvid3,
+    )
+    try:
+        os.makedirs(Path(args.db_path).parent, exist_ok=True)
+        await at_db.init_db(args.db_path)
+        processor = Processor(client=client, sender_uid=creds.mid)
+        results = await processor.execute_replies(limit=args.limit)
+        for r in results:
+            status = r["status"]
+            msg_id = r["msg_id"]
+            error = r.get("error")
+            reply_method = r.get("reply_method", "")
+            if error:
+                print(f"[{status}] msg_id={msg_id}, error={error}")
+            else:
+                print(f"[{status}] msg_id={msg_id}, method={reply_method}")
     finally:
         await client.close()
 
@@ -181,16 +290,16 @@ async def _handle_status(args: argparse.Namespace) -> None:
 
     counts, total = await asyncio.to_thread(_query_counts)
 
-    other = (
-        total
-        - counts.get("pending", 0)
-        - counts.get("replied", 0)
-        - counts.get("failed", 0)
-    )
-    print(f"pending:  {counts.get('pending', 0)}")
-    print(f"replied:  {counts.get('replied', 0)}")
-    print(f"failed:   {counts.get('failed', 0)}")
-    print(f"other:    {other}")
+    for status in (
+        "pending", "classifying", "classified", "prompting",
+        "pending_reply", "replied", "failed",
+    ):
+        cnt = counts.get(status, 0)
+        if cnt > 0:
+            print(f"{status}:  {cnt}")
+    other = total - sum(counts.values())
+    if other > 0:
+        print(f"other:    {other}")
     print(f"total:    {total}")
 
 
@@ -213,7 +322,7 @@ def _drop_tables(db_path: str) -> None:
         conn.close()
 
 
-# ── Entry point ─────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -227,6 +336,10 @@ def main(argv: list[str] | None = None) -> None:
         asyncio.run(_handle_fetch(args))
     elif handler == "process":
         asyncio.run(_handle_process(args))
+    elif handler == "skill_prompt":
+        asyncio.run(_handle_skill_prompt(args))
+    elif handler == "reply":
+        asyncio.run(_handle_reply(args))
     elif handler == "status":
         asyncio.run(_handle_status(args))
     elif handler == "reset":

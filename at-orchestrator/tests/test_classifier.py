@@ -6,7 +6,12 @@ import json
 
 import pytest
 
-from at_orchestrator.classifier import build_classification_prompt, parse_llm_result
+from at_orchestrator.classifier import (
+    build_classification_prompt,
+    build_skill_prompt,
+    parse_llm_result,
+    parse_skill_result,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -471,3 +476,123 @@ class TestParseLLMResultDictStructure:
         assert results is not None
         assert results[0]["msg_id"] == 1001
         assert results[0]["skill_name"] == "video-analyzer"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# build_skill_prompt
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestBuildSkillPrompt:
+    """build_skill_prompt() — builds skill-specific LLM prompts."""
+
+    def _task(self, content: str = "分析这个视频", nickname: str = "测试用户") -> dict:
+        return {"msg_id": 1, "source": "reply", "content": content, "user_nickname": nickname}
+
+    def test_video_analyzer_prompt_contains_bvid(self) -> None:
+        task = self._task("分析视频BV1abc")
+        classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1abc"}}
+        prompt = build_skill_prompt(task, classification)
+        assert "BV1abc" in prompt
+        assert "视频" in prompt or "video" in prompt.lower()
+        assert "reply_content" in prompt
+
+    def test_video_analyzer_prompt_contains_nickname(self) -> None:
+        task = self._task("分析视频BV1xx", nickname="张三")
+        classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}}
+        prompt = build_skill_prompt(task, classification)
+        assert "张三" in prompt
+
+    def test_watch_later_prompt_contains_topic(self) -> None:
+        task = self._task("推荐AI视频")
+        classification = {"skill_name": "watch-later-recommender", "params": {"topic": "AI"}}
+        prompt = build_skill_prompt(task, classification)
+        assert "AI" in prompt
+        assert "推荐" in prompt
+        assert "reply_content" in prompt
+
+    def test_watch_later_prompt_content_as_topic_when_no_topic_param(self) -> None:
+        task = self._task("帮我推荐几个搞笑视频")
+        classification = {"skill_name": "watch-later-recommender", "params": {}}
+        prompt = build_skill_prompt(task, classification)
+        assert "搞笑视频" in prompt
+
+    def test_unknown_skill_returns_generic_prompt(self) -> None:
+        task = self._task("hello")
+        classification = {"skill_name": "unknown", "params": {}}
+        prompt = build_skill_prompt(task, classification)
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+        assert "unknown" in prompt
+        assert "reply_content" in prompt
+
+    def test_prompt_instructs_json_output(self) -> None:
+        task = self._task("分析BV1xx")
+        classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}}
+        prompt = build_skill_prompt(task, classification)
+        assert "json" in prompt.lower()
+        assert "reply_content" in prompt
+
+
+# ──────────────────────────────────────────────────────────────────────
+# parse_skill_result
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestParseSkillResult:
+    """parse_skill_result() — extracts structured data from LLM skill output."""
+
+    def test_extracts_reply_content_from_json(self) -> None:
+        llm_text = """回复文本：
+这是分析结果
+
+```json
+{"reply_content": "这是分析结果", "bvid": "BV1xx"}
+```"""
+        result = parse_skill_result("video-analyzer", llm_text)
+        assert result is not None
+        assert result["reply_content"] == "这是分析结果"
+        assert result["skill"] == "video-analyzer"
+
+    def test_extracts_reply_content_from_bare_text(self) -> None:
+        llm_text = "你的视频分析完成，请查看。"
+        result = parse_skill_result("video-analyzer", llm_text)
+        assert result is not None
+        assert result["reply_content"] == "你的视频分析完成，请查看。"
+
+    def test_video_analyzer_extracts_bvid(self) -> None:
+        llm_text = """```json
+{"reply_content": "分析完成", "bvid": "BV1abc"}
+```"""
+        result = parse_skill_result("video-analyzer", llm_text)
+        assert result is not None
+        assert result["bvid"] == "BV1abc"
+
+    def test_watch_later_extracts_recommended_bvids(self) -> None:
+        llm_text = """```json
+{"reply_content": "推荐3个视频", "recommended_bvids": ["BV1aa", "BV2bb"], "reasons": ["热门", "相关"]}
+```"""
+        result = parse_skill_result("watch-later-recommender", llm_text)
+        assert result is not None
+        assert result["recommended_bvids"] == ["BV1aa", "BV2bb"]
+        assert result["reasons"] == ["热门", "相关"]
+
+    def test_non_list_bvids_defaults_to_empty(self) -> None:
+        llm_text = """```json
+{"reply_content": "推荐", "recommended_bvids": "not-a-list"}
+```"""
+        result = parse_skill_result("watch-later-recommender", llm_text)
+        assert result is not None
+        assert result["recommended_bvids"] == []
+
+    def test_empty_llm_text(self) -> None:
+        result = parse_skill_result("video-analyzer", "")
+        assert result is not None
+        assert result["reply_content"] == ""
+
+    def test_skill_is_preserved(self) -> None:
+        llm_text = "Done."
+        for skill in ("video-analyzer", "watch-later-recommender", "unknown"):
+            result = parse_skill_result(skill, llm_text)
+            assert result is not None
+            assert result["skill"] == skill

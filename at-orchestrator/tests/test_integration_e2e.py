@@ -1,18 +1,17 @@
-"""End-to-end integration tests for the Processor pipeline.
+"""End-to-end integration tests for the 3-phase Processor pipeline.
 
-Tests the full pipeline (pending → classifying → dispatching → replying →
-replied) with real SQLite and ALL external dependencies mocked:
+Tests the full 3-phase pipeline:
+Phase 1: pending → classified (classification)
+Phase 2: classified → prompting → pending_reply (skill prompt + result)
+Phase 3: pending_reply → replied (reply execution)
 
-- ``classifier.build_batch_classification_prompt`` / ``parse_llm_result``
-- ``Dispatcher.dispatch_with_timeout``
-- ``replier.reply_comment`` / ``reply_pm`` / ``check_session_detail``
-
-No real B站 API calls, no real subprocesses, no real LLM inference.
+All external dependencies mocked — no real B站 API calls or subprocesses.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import time
 from pathlib import Path
@@ -24,16 +23,7 @@ from at_orchestrator import db
 from at_orchestrator.processor import Processor
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────
-
 def _make_task(**overrides: object) -> dict:
-    """Create a complete task dict matching the DB schema columns.
-
-    All 16 columns from ``db._TASK_COLUMNS`` are present so
-    ``db.insert_task()`` can insert without ``None`` gaps.
-    """
     data: dict[str, object] = {
         "msg_id": 1001,
         "source": "reply",
@@ -49,19 +39,16 @@ def _make_task(**overrides: object) -> dict:
         "processed_at": None,
         "reply_method": None,
         "reply_error": None,
+        "classification_result": None,
+        "skill_result": None,
         "cursor_id": None,
         "cursor_time": None,
     }
-    data.update(overrides)  # type: ignore[arg-type]
-    return data  # type: ignore[return-value]
+    data.update(overrides)
+    return data
 
 
 async def _get_task_row(db_path: str, msg_id: int, source: str) -> dict | None:
-    """Read a single task row from the real SQLite database.
-
-    Returns a dict of all columns or ``None`` if not found.
-    """
-
     def _query() -> dict | None:
         conn = sqlite3.connect(db_path)
         try:
@@ -73,13 +60,10 @@ async def _get_task_row(db_path: str, msg_id: int, source: str) -> dict | None:
             return dict(row) if row else None
         finally:
             conn.close()
-
     return await asyncio.to_thread(_query)
 
 
 async def _count_tasks_by_status(db_path: str, status: str) -> int:
-    """Count tasks with the given status."""
-
     def _count() -> int:
         conn = sqlite3.connect(db_path)
         try:
@@ -89,551 +73,285 @@ async def _count_tasks_by_status(db_path: str, status: str) -> int:
             return cnt
         finally:
             conn.close()
-
     return await asyncio.to_thread(_count)
 
 
-def _make_valid_classification(
-    skill_name: str = "video-analyzer",
-    **params: object,
-) -> dict:
-    """Return a valid :class:`ClassificationResult` dict."""
-    return {
-        "skill_name": skill_name,
-        "params": params,
-        "confidence": 0.95,
-        "reason": f"User asked for {skill_name}",
-    }
+# ══════════════════════════════════════════════════════════════════════
+# E2E: Full 3-phase success path
+# ══════════════════════════════════════════════════════════════════════
 
 
-def _make_dispatch_result(
-    skill: str = "video-analyzer",
-    exit_code: int = 0,
-    stdout: str = "分析完成",
-    error: str | None = None,
-) -> dict:
-    """Return a :class:`DispatchResult`-compatible dict."""
-    return {
-        "skill": skill,
-        "exit_code": exit_code,
-        "stdout": stdout,
-        "output_file": "/tmp/at-orchestrator/1001_reply/output.md",
-        "error": error,
-    }
+class TestFull3PhaseSuccessPath:
+    """pending → classified → prompting → pending_reply → replied."""
 
-
-# ──────────────────────────────────────────────────────────────────────
-# E2E: Full success path
-# ──────────────────────────────────────────────────────────────────────
-
-
-class TestFullSuccessPath:
-    """pending → classifying → dispatching → replying → replied."""
-
-    async def test_full_success_path(self, tmp_db_path: Path) -> None:
-        # 1. Initialise real SQLite and insert 1 pending task
+    async def test_phase1_classification_success(self, tmp_db_path: Path) -> None:
+        """Phase 1: LLM classifies task, writes classification_result, status='classified'."""
         await db.init_db(str(tmp_db_path))
         task = _make_task()
         assert await db.insert_task(task) is True
 
-        # 2. Build mock dispatcher returning success
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock(
-            return_value=_make_dispatch_result(stdout="分析完成，视频详情已生成")
-        )
-
-        # 3. Create processor with all mocks returning success
         client = MagicMock()
-        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
+        classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "analyse video"}
 
         with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=[{**classification, "msg_id": 1001}],
-            ),
-            patch(
-                "at_orchestrator.processor.replier.reply_comment",
-                AsyncMock(return_value=True),
-            ),
+            patch("at_orchestrator.processor.classifier.build_batch_classification_prompt", return_value="fixed prompt"),
+            patch("at_orchestrator.processor.classifier.parse_llm_result", return_value=[{**classification, "msg_id": 1001}]),
         ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=1, llm_result='{"skill_name":"video-analyzer","params":{"bvid":"BV1xx"},"confidence":0.95,"reason":"test"}'
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.process_classification(
+                limit=1, llm_result="valid"
             )
 
-        # 4. Verify result list
         assert len(results) == 1
         assert results[0]["msg_id"] == 1001
-        assert results[0]["source"] == "reply"
-        assert results[0]["status"] == "replied"
-        assert results[0]["reply_method"] == "comment"
-        assert results[0]["error"] is None
+        assert results[0]["status"] == "classified"
 
-        # 5. Verify DB state — status transitions applied
         row = await _get_task_row(str(tmp_db_path), 1001, "reply")
         assert row is not None
+        assert row["status"] == "classified"
+        assert row["classification_result"] is not None
+        assert "video-analyzer" in row["classification_result"]
+
+    async def test_phase2_skill_prompt_and_apply(self, tmp_db_path: Path) -> None:
+        """Phase 2: prompt generation + result application → pending_reply."""
+        await db.init_db(str(tmp_db_path))
+
+        # Prepopulate with a classified task
+        classification_json = json.dumps({"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "test"})
+        task = _make_task(status="classified", classification_result=classification_json)
+        await db.insert_task(task)
+
+        # Phase 2a: build skill prompts
+        with (
+            patch("at_orchestrator.processor.classifier.build_skill_prompt", return_value="skill prompt text"),
+        ):
+            processor = Processor(client=MagicMock(), sender_uid=12345)
+            results = await processor.build_skill_prompts(limit=1)
+
+        assert results[0]["status"] == "prompting"
+        row = await _get_task_row(str(tmp_db_path), 1001, "reply")
+        assert row["status"] == "prompting"
+
+        # Phase 2b: apply skill result
+        llm_output = json.dumps({"msg_id": 1001, "reply_content": "分析完成！视频详情已生成。", "bvid": "BV1xx"})
+        with patch("at_orchestrator.processor.classifier._extract_json_text", return_value=None):
+            results2 = await processor.apply_skill_results(limit=1, llm_result=llm_output)
+
+        assert results2[0]["status"] == "pending_reply"
+        row2 = await _get_task_row(str(tmp_db_path), 1001, "reply")
+        assert row2["status"] == "pending_reply"
+        assert row2["skill_result"] is not None
+        assert row2["reply_method"] == "分析完成！视频详情已生成。"
+
+    async def test_phase3_reply_success(self, tmp_db_path: Path) -> None:
+        """Phase 3: execute reply → replied."""
+        await db.init_db(str(tmp_db_path))
+
+        task = _make_task(
+            status="pending_reply",
+            subject_id=12345,
+            reply_method="分析完成！",
+        )
+        await db.insert_task(task)
+
+        client = MagicMock()
+        with (
+            patch("at_orchestrator.processor.replier.reply_comment", AsyncMock(return_value=True)),
+        ):
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.execute_replies(limit=1)
+
+        assert results[0]["status"] == "replied"
+        assert results[0]["reply_method"] == "comment"
+        row = await _get_task_row(str(tmp_db_path), 1001, "reply")
         assert row["status"] == "replied"
         assert row["reply_method"] == "comment"
-        assert row["reply_error"] is None
-        assert row["processed_at"] is not None
-
-        # Only 1 task should be affected
-        assert await _count_tasks_by_status(str(tmp_db_path), "replied") == 1
 
 
-# ──────────────────────────────────────────────────────────────────────
-# E2E: Classification failure
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+# E2E: Phase 1 classification failure
+# ══════════════════════════════════════════════════════════════════════
 
 
 class TestClassificationFailure:
-    """Invalid LLM output → task status = 'failed' with error."""
+    """Invalid LLM output → task status = 'failed'."""
 
     async def test_classification_failure(self, tmp_db_path: Path) -> None:
         await db.init_db(str(tmp_db_path))
         task = _make_task()
         assert await db.insert_task(task) is True
 
-        # Mock parse_llm_result to return None (invalid LLM output)
         client = MagicMock()
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock()
-
         with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=None,  # ← classification failure
-            ),
+            patch("at_orchestrator.processor.classifier.build_batch_classification_prompt", return_value="fixed prompt"),
+            patch("at_orchestrator.processor.classifier.parse_llm_result", return_value=None),
         ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=1, llm_result="invalid garbage not json"
-            )
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.process_classification(limit=1, llm_result="invalid")
 
-        # Verify result
-        assert len(results) == 1
         assert results[0]["status"] == "failed"
         assert results[0]["error"] == "classification_failed"
-
-        # Verify DB state
         row = await _get_task_row(str(tmp_db_path), 1001, "reply")
-        assert row is not None
         assert row["status"] == "failed"
         assert row["reply_error"] == "classification_failed"
 
-        # Dispatcher MUST NOT be called after classification failure
-        mock_dispatcher.dispatch_with_timeout.assert_not_called()
 
-
-# ──────────────────────────────────────────────────────────────────────
-# E2E: Reply failure
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+# E2E: Phase 3 reply failure
+# ══════════════════════════════════════════════════════════════════════
 
 
 class TestReplyFailure:
-    """Mock API error during reply → task status = 'failed'."""
+    """Reply API failure → task status = 'failed'."""
 
     async def test_reply_failure(self, tmp_db_path: Path) -> None:
         await db.init_db(str(tmp_db_path))
-        task = _make_task(subject_id=12345)  # has subject_id → triggers comment reply
+        task = _make_task(status="pending_reply", subject_id=12345, reply_method="分析完成")
         assert await db.insert_task(task) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
-
-        # Dispatch succeeds but reply fails
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock(
-            return_value=_make_dispatch_result(
-                skill="video-analyzer", stdout="ok", exit_code=0
-            )
-        )
-
         with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=[{**classification, "msg_id": 1001}],
-            ),
-            patch(
-                "at_orchestrator.processor.replier.reply_comment",
-                AsyncMock(return_value=False),  # ← reply fails
-            ),
+            patch("at_orchestrator.processor.replier.reply_comment", AsyncMock(return_value=False)),
         ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=1,
-                llm_result='{"skill_name":"video-analyzer","params":{"bvid":"BV1xx"},"confidence":0.95,"reason":"test"}',
-            )
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.execute_replies(limit=1)
 
-        # Verify result
-        assert len(results) == 1
         assert results[0]["status"] == "failed"
         assert results[0]["error"] == "reply_failed"
-
-        # Verify DB state
         row = await _get_task_row(str(tmp_db_path), 1001, "reply")
-        assert row is not None
         assert row["status"] == "failed"
         assert row["reply_error"] == "reply_failed"
 
-    async def test_dispatch_non_zero_exit_code_fails(self, tmp_db_path: Path) -> None:
-        """Dispatch returns non-zero exit code → marked failed before reply phase."""
-        await db.init_db(str(tmp_db_path))
-        task = _make_task()
-        assert await db.insert_task(task) is True
 
-        client = MagicMock()
-        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
-
-        # Dispatch fails with exit code 1
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock(
-            return_value=_make_dispatch_result(exit_code=1, error="non-zero exit code 1")
-        )
-
-        with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=[{**classification, "msg_id": 1001}],
-            ),
-        ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=1,
-                llm_result='{"skill_name":"video-analyzer","params":{"bvid":"BV1xx"},"confidence":0.95,"reason":"test"}',
-            )
-
-        assert len(results) == 1
-        assert results[0]["status"] == "failed"
-        assert "exit code 1" in results[0]["error"]
-
-        row = await _get_task_row(str(tmp_db_path), 1001, "reply")
-        assert row is not None
-        assert row["status"] == "failed"
-
-
-# ──────────────────────────────────────────────────────────────────────
-# E2E: Batch processing
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+# E2E: Phase 1 batch processing
+# ══════════════════════════════════════════════════════════════════════
 
 
 class TestBatchProcessing:
-    """limit=3 processes exactly 3 pending tasks."""
+    """limit=3 processes exactly 3 tasks through Phase 1."""
 
-    async def test_batch_processing(self, tmp_db_path: Path) -> None:
+    async def test_batch_classification(self, tmp_db_path: Path) -> None:
         await db.init_db(str(tmp_db_path))
-
-        # Insert 3 pending tasks
-        t1 = _make_task(msg_id=1, content="分析 BV1xx")
-        t2 = _make_task(msg_id=2, content="推荐视频")
-        t3 = _make_task(msg_id=3, content="发布动态")
-        for t in (t1, t2, t3):
-            assert await db.insert_task(t) is True
-
-        client = MagicMock()
-        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
-
-        # All mocks return success
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock(
-            return_value=_make_dispatch_result(
-                skill="video-analyzer", stdout="ok", exit_code=0
-            )
-        )
-
-        with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=[
-                    {**classification, "msg_id": 1},
-                    {**classification, "msg_id": 2},
-                    {**classification, "msg_id": 3},
-                ],
-            ),
-            patch(
-                "at_orchestrator.processor.replier.reply_comment",
-                AsyncMock(return_value=True),
-            ),
-        ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=3,
-                llm_result='{"skill_name":"video-analyzer","params":{"bvid":"BV1xx"},"confidence":0.95,"reason":"test"}',
-            )
-
-        # All 3 tasks processed
-        assert len(results) == 3
-        for i, r in enumerate(results, start=1):
-            assert r["msg_id"] == i
-            assert r["status"] == "replied"
-
-        # DB: 3 tasks in "replied" status
-        assert await _count_tasks_by_status(str(tmp_db_path), "replied") == 3
-        assert await _count_tasks_by_status(str(tmp_db_path), "pending") == 0
-
-        # Each task row should be individually correct
-        for msg_id in (1, 2, 3):
-            row = await _get_task_row(str(tmp_db_path), msg_id, "reply")
-            assert row is not None
-            assert row["status"] == "replied"
-            assert row["reply_method"] == "comment"
-            assert row["processed_at"] is not None
-
-    async def test_batch_mixed_outcomes(self, tmp_db_path: Path) -> None:
-        """Verify that when one task fails classification, others still process."""
-        await db.init_db(str(tmp_db_path))
-
-        # Insert 3 tasks — second one will get invalid classification
-        t1 = _make_task(msg_id=1, content="分析 BV1xx")
-        t2 = _make_task(msg_id=2, content="garbage")
-        t3 = _make_task(msg_id=3, content="发布动态")
-        for t in (t1, t2, t3):
-            assert await db.insert_task(t) is True
-
-        client = MagicMock()
-        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
-
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock(
-            return_value=_make_dispatch_result(stdout="ok")
-        )
-
-        with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                # msg_id=2 intentionally absent → "no_classification_in_llm_output"
-                return_value=[
-                    {**classification, "msg_id": 1},
-                    {**classification, "msg_id": 3},
-                ],
-            ),
-            patch(
-                "at_orchestrator.processor.replier.reply_comment",
-                AsyncMock(return_value=True),
-            ),
-        ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=3,
-                llm_result="valid",
-            )
-
-        # 3 results
-        assert len(results) == 3
-
-        # Task 1: replied
-        assert results[0]["msg_id"] == 1
-        assert results[0]["status"] == "replied"
-
-        # Task 2: failed (no classification in LLM output)
-        assert results[1]["msg_id"] == 2
-        assert results[1]["status"] == "failed"
-        assert results[1]["error"] == "no_classification_in_llm_output"
-
-        # Task 3: replied
-        assert results[2]["msg_id"] == 3
-        assert results[2]["status"] == "replied"
-
-        # DB verification
-        row1 = await _get_task_row(str(tmp_db_path), 1, "reply")
-        assert row1["status"] == "replied"
-
-        row2 = await _get_task_row(str(tmp_db_path), 2, "reply")
-        assert row2["status"] == "failed"
-        assert row2["reply_error"] == "no_classification_in_llm_output"
-
-        row3 = await _get_task_row(str(tmp_db_path), 3, "reply")
-        assert row3["status"] == "replied"
-
-    async def test_batch_limited_by_limit(self, tmp_db_path: Path) -> None:
-        """When limit < pending count, only limit tasks are processed."""
-        await db.init_db(str(tmp_db_path))
-
-        # Insert 5 pending tasks
         for i in range(1, 6):
             t = _make_task(msg_id=i, content=f"task {i}")
             assert await db.insert_task(t) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
-
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock(
-            return_value=_make_dispatch_result(stdout="ok")
-        )
+        classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "test"}
 
         with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=[
-                    {**classification, "msg_id": 1},
-                    {**classification, "msg_id": 2},
-                    {**classification, "msg_id": 3},
-                ],
-            ),
-            patch(
-                "at_orchestrator.processor.replier.reply_comment",
-                AsyncMock(return_value=True),
-            ),
+            patch("at_orchestrator.processor.classifier.build_batch_classification_prompt", return_value="fixed prompt"),
+            patch("at_orchestrator.processor.classifier.parse_llm_result", return_value=[
+                {**classification, "msg_id": 1},
+                {**classification, "msg_id": 2},
+                {**classification, "msg_id": 3},
+            ]),
         ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=3,
-                llm_result="valid",
-            )
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.process_classification(limit=3, llm_result="valid")
 
-        # Only 3 processed
         assert len(results) == 3
-        assert await _count_tasks_by_status(str(tmp_db_path), "replied") == 3
+        assert await _count_tasks_by_status(str(tmp_db_path), "classified") == 3
         assert await _count_tasks_by_status(str(tmp_db_path), "pending") == 2
+        for msg_id in (1, 2, 3):
+            row = await _get_task_row(str(tmp_db_path), msg_id, "reply")
+            assert row["status"] == "classified"
+            assert row["classification_result"] is not None
+            assert row["processed_at"] is not None
 
-
-# ──────────────────────────────────────────────────────────────────────
-# E2E: PM reply path
-# ──────────────────────────────────────────────────────────────────────
-
-
-class TestPMReplyPath:
-    """Long stdout triggers private message reply."""
-
-    async def test_pm_reply_success(self, tmp_db_path: Path) -> None:
+    async def test_batch_mixed_outcomes(self, tmp_db_path: Path) -> None:
+        """One task gets no classification in LLM output → failed, others → classified."""
         await db.init_db(str(tmp_db_path))
-        task = _make_task(subject_id=12345, user_mid=99999)
-        assert await db.insert_task(task) is True
+        for i in range(1, 4):
+            t = _make_task(msg_id=i, content=f"task {i}")
+            assert await db.insert_task(t) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("video-analyzer", bvid="BV1xx")
-
-        # Dispatch returns long output → PM path
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock(
-            return_value=_make_dispatch_result(
-                skill="video-analyzer",
-                stdout="x" * 500,  # >= 200 chars → PM
-            )
-        )
+        classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "test"}
 
         with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=[{**classification, "msg_id": 1001}],
-            ),
-            patch(
-                "at_orchestrator.processor.replier.check_session_detail",
-                AsyncMock(return_value=True),  # session exists
-            ),
-            patch(
-                "at_orchestrator.processor.replier.reply_pm",
-                AsyncMock(return_value=True),
-            ),
+            patch("at_orchestrator.processor.classifier.build_batch_classification_prompt", return_value="fixed prompt"),
+            patch("at_orchestrator.processor.classifier.parse_llm_result", return_value=[
+                {**classification, "msg_id": 1},
+                {**classification, "msg_id": 3},
+            ]),
         ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=1,
-                llm_result="valid",
-            )
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.process_classification(limit=3, llm_result="valid")
 
-        assert len(results) == 1
-        assert results[0]["status"] == "replied"
-        assert results[0]["reply_method"] == "pm"
+        assert len(results) == 3
+        assert results[0]["msg_id"] == 1
+        assert results[0]["status"] == "classified"
+        assert results[1]["msg_id"] == 2
+        assert results[1]["status"] == "failed"
+        assert results[1]["error"] == "no_classification_in_llm_output"
+        assert results[2]["msg_id"] == 3
+        assert results[2]["status"] == "classified"
 
-        row = await _get_task_row(str(tmp_db_path), 1001, "reply")
-        assert row["status"] == "replied"
-        assert row["reply_method"] == "pm"
+        row2 = await _get_task_row(str(tmp_db_path), 2, "reply")
+        assert row2["status"] == "failed"
 
 
-# ──────────────────────────────────────────────────────────────────────
-# E2E: Unknown skill shortcut
-# ──────────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════
+# E2E: Phase 1 unknown skill shortcut
+# ══════════════════════════════════════════════════════════════════════
 
 
 class TestUnknownSkill:
-    """Skill 'unknown' skips dispatch entirely, marks replied immediately."""
+    """Skill 'unknown' skips dispatch, marks replied immediately in Phase 1."""
 
-    async def test_unknown_skill_skips_dispatch(self, tmp_db_path: Path) -> None:
+    async def test_unknown_skill(self, tmp_db_path: Path) -> None:
         await db.init_db(str(tmp_db_path))
         task = _make_task()
         assert await db.insert_task(task) is True
 
         client = MagicMock()
-        classification = _make_valid_classification("unknown")
-
-        mock_dispatcher = MagicMock()
-        mock_dispatcher.dispatch_with_timeout = AsyncMock()
+        classification = {"skill_name": "unknown", "params": {}, "confidence": 0.95, "reason": "not actionable"}
 
         with (
-            patch(
-                "at_orchestrator.processor.classifier.build_batch_classification_prompt",
-                return_value="fixed prompt",
-            ),
-            patch(
-                "at_orchestrator.processor.classifier.parse_llm_result",
-                return_value=[{**classification, "msg_id": 1001}],
-            ),
+            patch("at_orchestrator.processor.classifier.build_batch_classification_prompt", return_value="fixed prompt"),
+            patch("at_orchestrator.processor.classifier.parse_llm_result", return_value=[{**classification, "msg_id": 1001}]),
         ):
-            processor = Processor(
-                client=client, sender_uid=12345, dispatcher=mock_dispatcher
-            )
-            results = await processor.process_pending(
-                limit=1,
-                llm_result='{"skill_name":"unknown","params":{},"confidence":0.95,"reason":"not actionable"}',
-            )
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.process_classification(limit=1, llm_result="valid")
 
-        assert len(results) == 1
         assert results[0]["status"] == "replied"
         assert results[0]["reply_method"] == "none"
-
-        # Dispatch NOT called
-        mock_dispatcher.dispatch_with_timeout.assert_not_called()
-
         row = await _get_task_row(str(tmp_db_path), 1001, "reply")
         assert row["status"] == "replied"
         assert row["reply_method"] == "none"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# E2E: Phase 3 PM reply path
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestPMReplyPath:
+    """Long reply_content triggers private message reply."""
+
+    async def test_pm_reply_success(self, tmp_db_path: Path) -> None:
+        await db.init_db(str(tmp_db_path))
+        long_content = "x" * 500
+        task = _make_task(
+            status="pending_reply",
+            subject_id=12345,
+            user_mid=99999,
+            reply_method=long_content,
+        )
+        assert await db.insert_task(task) is True
+
+        client = MagicMock()
+        with (
+            patch("at_orchestrator.processor.replier.check_session_detail", AsyncMock(return_value=True)),
+            patch("at_orchestrator.processor.replier.reply_pm", AsyncMock(return_value=True)),
+        ):
+            processor = Processor(client=client, sender_uid=12345)
+            results = await processor.execute_replies(limit=1)
+
+        assert results[0]["status"] == "replied"
+        assert results[0]["reply_method"] == "pm"
+        row = await _get_task_row(str(tmp_db_path), 1001, "reply")
+        assert row["status"] == "replied"
+        assert row["reply_method"] == "pm"
