@@ -157,8 +157,13 @@ async def insert_task(task: dict[str, Any]) -> bool:
     return await asyncio.to_thread(_insert)
 
 
-async def get_pending_tasks(limit: int = 10) -> list[dict[str, Any]]:
+async def get_pending_tasks(
+    limit: int = 10, source: str | None = None
+) -> list[dict[str, Any]]:
     """Return up to *limit* pending tasks ordered by ``created_at`` ASC.
+
+    When *source* is provided (e.g. ``"reply"`` or ``"at"``), only tasks
+    matching that source type are returned.
 
     Returns empty list when no pending tasks exist.
     """
@@ -167,11 +172,18 @@ async def get_pending_tasks(limit: int = 10) -> list[dict[str, Any]]:
         conn = sqlite3.connect(_get_db(), check_same_thread=False)
         try:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM tasks WHERE status = 'pending' "
-                "ORDER BY created_at ASC LIMIT ?",
-                (limit,),
-            ).fetchall()
+            if source is not None:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE status = 'pending' AND source = ? "
+                    "ORDER BY created_at ASC LIMIT ?",
+                    (source, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE status = 'pending' "
+                    "ORDER BY created_at ASC LIMIT ?",
+                    (limit,),
+                ).fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()
@@ -233,13 +245,15 @@ async def update_task_reply(
 
 
 async def get_tasks_by_status(
-    status: str | tuple[str, ...], limit: int = 10
+    status: str | tuple[str, ...], limit: int = 10, source: str | None = None
 ) -> list[dict[str, Any]]:
     """Return up to *limit* tasks matching *status* (single or multiple),
     ordered by ``created_at`` ASC.
 
     ``status`` can be a single string (e.g. ``"pending"``) or a tuple of
     strings (e.g. ``("pending", "classifying")``).
+
+    When *source* is provided, only tasks matching that source type are returned.
 
     Returns empty list when no matching tasks exist.
     """
@@ -250,17 +264,32 @@ async def get_tasks_by_status(
             conn.row_factory = sqlite3.Row
             if isinstance(status, tuple):
                 placeholders = ", ".join("?" for _ in status)
-                sql = (
-                    f"SELECT * FROM tasks WHERE status IN ({placeholders}) "
-                    "ORDER BY created_at ASC LIMIT ?"
-                )
-                rows = conn.execute(sql, (*status, limit)).fetchall()
+                if source is not None:
+                    sql = (
+                        f"SELECT * FROM tasks WHERE status IN ({placeholders}) "
+                        "AND source = ? ORDER BY created_at ASC LIMIT ?"
+                    )
+                    params = (*status, source, limit)
+                else:
+                    sql = (
+                        f"SELECT * FROM tasks WHERE status IN ({placeholders}) "
+                        "ORDER BY created_at ASC LIMIT ?"
+                    )
+                    params = (*status, limit)
             else:
-                rows = conn.execute(
-                    "SELECT * FROM tasks WHERE status = ? "
-                    "ORDER BY created_at ASC LIMIT ?",
-                    (status, limit),
-                ).fetchall()
+                if source is not None:
+                    sql = (
+                        "SELECT * FROM tasks WHERE status = ? AND source = ? "
+                        "ORDER BY created_at ASC LIMIT ?"
+                    )
+                    params = (status, source, limit)
+                else:
+                    sql = (
+                        "SELECT * FROM tasks WHERE status = ? "
+                        "ORDER BY created_at ASC LIMIT ?"
+                    )
+                    params = (status, limit)
+            rows = conn.execute(sql, params).fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()

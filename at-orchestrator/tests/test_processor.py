@@ -105,7 +105,7 @@ class TestProcessClassificationEmpty:
             mock_db.get_pending_tasks = AsyncMock(return_value=[])
             processor = Processor(client=MagicMock(), sender_uid=12345)
             await processor.process_classification(limit=5)
-            mock_db.get_pending_tasks.assert_called_once_with(5)
+            mock_db.get_pending_tasks.assert_called_once_with(5, source=None)
 
 
 class TestProcessClassificationDryRun:

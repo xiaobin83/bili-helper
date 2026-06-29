@@ -93,16 +93,11 @@ class Processor:
         results: list[dict[str, Any]] = []
 
         if llm_result is not None and not dry_run:
-            tasks = await db.get_tasks_by_status("classifying", limit)
+            tasks = await db.get_tasks_by_status("classifying", limit, source=source)
         else:
-            tasks = await db.get_pending_tasks(limit)
+            tasks = await db.get_pending_tasks(limit, source=source)
         if not tasks:
             return results
-
-        if source is not None:
-            tasks = [t for t in tasks if str(t.get("source", "")) == source]
-            if not tasks:
-                return results
 
         batch_prompt = classifier.build_batch_classification_prompt(tasks)
 
