@@ -58,7 +58,11 @@ Few-shot 示例（消息列表 → 分类数组）：
 
 请只输出 JSON 数组，不要额外文字。
 每条输出格式：
-{{"msg_id": ..., "skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}"""
+{{"msg_id": ..., "skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}
+
+后续操作指引：
+1. 将以上 JSON 输出保存到临时文件（如 /tmp/at-orchestrator/classification-result.json）
+2. 执行命令将结果写回数据库：at-orchestrator process --apply-classification-result /tmp/at-orchestrator/classification-result.json"""
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -87,7 +91,11 @@ Few-shot 示例：
 
 请只输出 JSON 数组，不要额外文字。
 每条格式：
-{{"msg_id": ..., "skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}"""
+{{"msg_id": ..., "skill_name": "...", "params": {{...}}, "confidence": 0.0-1.0, "reason": "..."}}
+
+后续操作指引：
+1. 将以上 JSON 输出保存到临时文件（如 /tmp/at-orchestrator/classification-result.json）
+2. 执行命令将结果写回数据库：at-orchestrator process --apply-classification-result /tmp/at-orchestrator/classification-result.json"""
 
 
 def build_classification_prompt(task_dict: dict[str, Any]) -> str:
@@ -288,81 +296,77 @@ def parse_llm_result(llm_text: str) -> list[dict[str, Any]] | None:
 
 _VIDEO_ANALYZER_PROMPT = """你是 B站 视频分析助手。用户请求分析一个B站视频，请执行以下任务：
 
-1. 获取视频详情、热评、高能进度条、AI总结、播放地址等信息
-2. 生成人性化的回复文本，总结视频内容并回应评论者
+1. 一次性给出完整回复，不要向用户追问任何问题
+2. 如果无法完成任务或没有合适内容可回复，reply_content 设为空字符串（后续会自动跳过）
+3. 生成人性化的回复文本，总结视频内容并回应评论者
 
 任务信息：
 - 视频 BV号: {bvid}
 - 用户评论: {content}
 - 用户昵称: {nickname}
 
-请输出两部分：
-1. 回复文本（直接回复给用户的文字，人性化、友好）
-2. JSON 结构化数据
-
-输出格式：
-```
-回复文本：
-{{你的回复内容}}
-
+输出格式（只输出 JSON，不要其他文字）：
 ```json
 {{
-  "reply_content": "回复文本（与上面一致）",
+  "reply_content": "回复文本（直接回复用户的文字，人性化友好；如不回复则为空字符串）",
   "bvid": "{bvid}",
   "skill": "video-analyzer"
 }}
-```"""
+```
+
+后续操作指引：
+1. 将以上 JSON 输出保存到临时文件（如 /tmp/at-orchestrator/skill-result.json）
+2. 执行命令将结果写回数据库：at-orchestrator skill-prompt --apply-skill-result /tmp/at-orchestrator/skill-result.json
+"""
 
 _WATCH_LATER_PROMPT = """你是 B站 视频推荐助手。用户请求推荐视频，请执行以下任务：
 
-1. 根据用户的需求（主题、数量等）从热门和排行中精选视频
-2. 生成推荐回复文本
+1. 一次性给出完整回复，不要向用户追问任何问题
+2. 如果无法推荐或没有合适视频，reply_content 设为空字符串（后续会自动跳过）
+3. 根据用户的需求（主题、数量等）从热门和排行中精选视频，生成推荐回复文本
 
 任务信息：
 - 推荐主题: {topic}
 - 用户评论: {content}
 - 用户昵称: {nickname}
 
-请输出两部分：
-1. 推荐回复文本（告诉用户你推荐了哪些视频）
-2. JSON 结构化数据
-
-输出格式：
-```
-推荐回复：
-{{你的回复内容}}
-
+输出格式（只输出 JSON，不要其他文字）：
 ```json
 {{
-  "reply_content": "推荐回复文本（与上面一致）",
+  "reply_content": "推荐回复文本（人性化，包含推荐理由；如不推荐则为空字符串）",
   "recommended_bvids": ["BV1xx", "BV2xx"],
   "reasons": ["原因1", "原因2"],
   "skill": "watch-later-recommender"
 }}
-```"""
+```
+
+后续操作指引：
+1. 将以上 JSON 输出保存到临时文件（如 /tmp/at-orchestrator/skill-result.json）
+2. 执行命令将结果写回数据库：at-orchestrator skill-prompt --apply-skill-result /tmp/at-orchestrator/skill-result.json
+"""
 
 _GENERIC_SKILL_PROMPT = """你是 B站 互动助手。用户提出了以下请求，请根据内容生成恰当的回复。
+
+1. 一次性给出完整回复，不要向用户追问任何问题
+2. 如果无法处理或没有恰当回复，reply_content 设为空字符串（后续会自动跳过）
 
 任务信息：
 - 技能: {skill_name}
 - 用户评论: {content}
 - 用户昵称: {nickname}
 
-请输出两部分：
-1. 回复文本（直接回复给用户的文字）
-2. JSON 结构化数据
-
-输出格式：
-```
-回复文本：
-{{你的回复内容}}
-
+输出格式（只输出 JSON，不要其他文字）：
 ```json
 {{
-  "reply_content": "回复文本（与上面一致）",
+  "reply_content": "回复文本（直接回复用户的文字；如不回复则为空字符串）",
   "skill": "{skill_name}"
 }}
-```"""
+```
+
+后续操作指引：
+1. 将以上 JSON 输出保存到临时文件（如 /tmp/at-orchestrator/skill-result.json）
+2. 执行命令将结果写回数据库：at-orchestrator skill-prompt --apply-skill-result /tmp/at-orchestrator/skill-result.json
+"""
 
 
 def build_skill_prompt(task_dict: dict[str, Any], classification: dict[str, Any]) -> str:

@@ -90,6 +90,9 @@ class TestFull3PhaseSuccessPath:
         task = _make_task()
         assert await db.insert_task(task) is True
 
+        # Pre-mark as classifying (as done by a prior prompt-only run)
+        await db.update_task_status(1001, "reply", "classifying")
+
         client = MagicMock()
         classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "analyse video"}
 
@@ -181,6 +184,8 @@ class TestClassificationFailure:
         task = _make_task()
         assert await db.insert_task(task) is True
 
+        await db.update_task_status(1001, "reply", "classifying")
+
         client = MagicMock()
         with (
             patch("at_orchestrator.processor.classifier.build_batch_classification_prompt", return_value="fixed prompt"),
@@ -240,6 +245,10 @@ class TestBatchProcessing:
         client = MagicMock()
         classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "test"}
 
+        # Pre-mark all pending tasks as classifying (as done by a prior prompt-only run)
+        for msg_id in range(1, 6):
+            await db.update_task_status(msg_id, "reply", "classifying")
+
         with (
             patch("at_orchestrator.processor.classifier.build_batch_classification_prompt", return_value="fixed prompt"),
             patch("at_orchestrator.processor.classifier.parse_llm_result", return_value=[
@@ -253,7 +262,7 @@ class TestBatchProcessing:
 
         assert len(results) == 3
         assert await _count_tasks_by_status(str(tmp_db_path), "classified") == 3
-        assert await _count_tasks_by_status(str(tmp_db_path), "pending") == 2
+        assert await _count_tasks_by_status(str(tmp_db_path), "classifying") == 2
         for msg_id in (1, 2, 3):
             row = await _get_task_row(str(tmp_db_path), msg_id, "reply")
             assert row["status"] == "classified"
@@ -266,6 +275,10 @@ class TestBatchProcessing:
         for i in range(1, 4):
             t = _make_task(msg_id=i, content=f"task {i}")
             assert await db.insert_task(t) is True
+
+        # Pre-mark all as classifying
+        for msg_id in range(1, 4):
+            await db.update_task_status(msg_id, "reply", "classifying")
 
         client = MagicMock()
         classification = {"skill_name": "video-analyzer", "params": {"bvid": "BV1xx"}, "confidence": 0.95, "reason": "test"}
@@ -305,6 +318,8 @@ class TestUnknownSkill:
         await db.init_db(str(tmp_db_path))
         task = _make_task()
         assert await db.insert_task(task) is True
+
+        await db.update_task_status(1001, "reply", "classifying")
 
         client = MagicMock()
         classification = {"skill_name": "unknown", "params": {}, "confidence": 0.95, "reason": "not actionable"}

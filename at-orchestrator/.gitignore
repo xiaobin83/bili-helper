@@ -11,3 +11,4 @@ uv.lock
 # IDE
 .idea/
 .vscode/
+llm-result.json

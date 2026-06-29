@@ -95,6 +95,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="Apply LLM skill result from file (Phase 2b)",
     )
+    p_skill.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print skill prompts without updating task status",
+    )
     p_skill.set_defaults(_handler="skill_prompt")
 
     # reply (Phase 3: post replies)
@@ -234,12 +240,13 @@ async def _handle_skill_prompt(args: argparse.Namespace) -> None:
                 print(f"[{status}] msg_id={msg_id}")
     else:
         processor = Processor(client=None, sender_uid=0)
-        results = await processor.build_skill_prompts(limit=args.limit)
+        results = await processor.build_skill_prompts(limit=args.limit, dry_run=args.dry_run)
         if not results:
             print("No classified tasks found.")
         else:
             for r in results:
-                print(f"[{r['status']}] msg_id={r['msg_id']}")
+                status_label = r["status"]
+                print(f"[{status_label}] msg_id={r['msg_id']}")
 
 
 async def _handle_reply(args: argparse.Namespace) -> None:

@@ -91,7 +91,10 @@ class Processor:
         """
         results: list[dict[str, Any]] = []
 
-        tasks = await db.get_pending_tasks(limit)
+        if llm_result is not None and not dry_run:
+            tasks = await db.get_tasks_by_status("classifying", limit)
+        else:
+            tasks = await db.get_pending_tasks(limit)
         if not tasks:
             return results
 
@@ -173,11 +176,12 @@ class Processor:
     # ── Phase 2: Skill prompt generation ──────────────────────────────
 
     async def build_skill_prompts(
-        self, limit: int = 5
+        self, limit: int = 5, dry_run: bool = False
     ) -> list[dict[str, Any]]:
         """Phase 2a: Read 'classified' tasks, build skill prompts, print to stdout.
 
         Each task advances from ``'classified'`` to ``'prompting'``.
+        When *dry_run* is ``True``, prints prompts without advancing status.
         """
         results: list[dict[str, Any]] = []
 
@@ -202,9 +206,10 @@ class Processor:
             print(prompt)
             print(f"--- END SKILL PROMPT msg_id={msg_id} ---")
 
-            await db.update_task_status(msg_id, source, "prompting")
+            if not dry_run:
+                await db.update_task_status(msg_id, source, "prompting")
             r = self._make_task_result(task)
-            r["status"] = "prompting"
+            r["status"] = "prompting" if not dry_run else str(task.get("status", "classified"))
             results.append(r)
 
         return results

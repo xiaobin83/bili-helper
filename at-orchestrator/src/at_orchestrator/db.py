@@ -232,9 +232,14 @@ async def update_task_reply(
     await asyncio.to_thread(_update)
 
 
-async def get_tasks_by_status(status: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Return up to *limit* tasks with the given *status*, ordered by
-    ``created_at`` ASC.
+async def get_tasks_by_status(
+    status: str | tuple[str, ...], limit: int = 10
+) -> list[dict[str, Any]]:
+    """Return up to *limit* tasks matching *status* (single or multiple),
+    ordered by ``created_at`` ASC.
+
+    ``status`` can be a single string (e.g. ``"pending"``) or a tuple of
+    strings (e.g. ``("pending", "classifying")``).
 
     Returns empty list when no matching tasks exist.
     """
@@ -243,11 +248,19 @@ async def get_tasks_by_status(status: str, limit: int = 10) -> list[dict[str, An
         conn = sqlite3.connect(_get_db(), check_same_thread=False)
         try:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM tasks WHERE status = ? "
-                "ORDER BY created_at ASC LIMIT ?",
-                (status, limit),
-            ).fetchall()
+            if isinstance(status, tuple):
+                placeholders = ", ".join("?" for _ in status)
+                sql = (
+                    f"SELECT * FROM tasks WHERE status IN ({placeholders}) "
+                    "ORDER BY created_at ASC LIMIT ?"
+                )
+                rows = conn.execute(sql, (*status, limit)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM tasks WHERE status = ? "
+                    "ORDER BY created_at ASC LIMIT ?",
+                    (status, limit),
+                ).fetchall()
             return [dict(row) for row in rows]
         finally:
             conn.close()

@@ -175,7 +175,7 @@ class TestProcessClassificationFailed:
             patch("at_orchestrator.processor.db") as mock_db,
             patch("at_orchestrator.processor.classifier") as mock_classifier,
         ):
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
             mock_classifier.parse_llm_result.return_value = None
@@ -199,7 +199,7 @@ class TestProcessClassificationUnknownSkill:
             patch("at_orchestrator.processor.db") as mock_db,
             patch("at_orchestrator.processor.classifier") as mock_classifier,
         ):
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_task_reply = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
@@ -231,7 +231,7 @@ class TestProcessClassificationSuccess:
             patch("at_orchestrator.processor.db") as mock_db,
             patch("at_orchestrator.processor.classifier") as mock_classifier,
         ):
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_classification = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
@@ -256,7 +256,7 @@ class TestProcessClassificationSuccess:
             patch("at_orchestrator.processor.db") as mock_db,
             patch("at_orchestrator.processor.classifier") as mock_classifier,
         ):
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task])
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task])
             mock_db.update_task_status = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
             # LLM output has msg_id=1001 but task has msg_id=9999
@@ -286,7 +286,7 @@ class TestProcessClassificationMultiple:
             patch("at_orchestrator.processor.db") as mock_db,
             patch("at_orchestrator.processor.classifier") as mock_classifier,
         ):
-            mock_db.get_pending_tasks = AsyncMock(return_value=[task1, task2])
+            mock_db.get_tasks_by_status = AsyncMock(return_value=[task1, task2])
             mock_db.update_task_status = AsyncMock()
             mock_db.update_classification = AsyncMock()
             mock_classifier.build_batch_classification_prompt.return_value = "prompt"
