@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# uv
+uv.lock
+
+# Database
+.at-orchestrator/
+
+# IDE
+.idea/
+.vscode/

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from at_orchestrator import __version__
 from at_orchestrator import db as at_db
+from at_orchestrator.constants import DB_PATH_DEFAULT
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -26,8 +27,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--db-path",
-        default=".at-orchestrator/tasks.db",
-        help="SQLite database path (default: .at-orchestrator/tasks.db)",
+        default=DB_PATH_DEFAULT,
+        help=f"SQLite database path (default: {DB_PATH_DEFAULT})",
     )
     parser.add_argument(
         "--auth-file",

@@ -75,5 +75,5 @@ SUBPROCESS_TIMEOUT: int = 120
 
 # ── Database ──────────────────────────────────────────────────────────
 
-DB_PATH_DEFAULT: str = ".at-orchestrator/tasks.db"
-"""Default path for the task database (relative to workspace root)."""
+DB_PATH_DEFAULT: str = str(Path.home() / ".bili-helper" / "at-orchestrator.db")
+"""Default path for the task database in ~/.bili-helper/."""

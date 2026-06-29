@@ -23,10 +23,10 @@ class TestGlobalArgs:
     """Global arguments: --db-path, --auth-file, --env-prefix."""
 
     def test_default_db_path(self) -> None:
-        """--db-path defaults to '.at-orchestrator/tasks.db'."""
+        """--db-path defaults to ~/.bili-helper/at-orchestrator.db."""
         parser = _build_parser()
-        args = parser.parse_args(["--db-path", ".at-orchestrator/tasks.db", "status"])
-        assert args.db_path == ".at-orchestrator/tasks.db"
+        args = parser.parse_args(["status"])
+        assert args.db_path.endswith(".bili-helper/at-orchestrator.db")
 
     def test_custom_db_path(self) -> None:
         """--db-path should accept a custom path (parsing succeeds)."""

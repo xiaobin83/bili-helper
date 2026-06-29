@@ -90,7 +90,7 @@ class TestNumericConstants:
         assert SUBPROCESS_TIMEOUT == 120
 
     def test_db_path_default(self) -> None:
-        assert DB_PATH_DEFAULT == ".at-orchestrator/tasks.db"
+        assert DB_PATH_DEFAULT.endswith(".bili-helper/at-orchestrator.db")
 
     def test_workplace_root_is_string(self) -> None:
         assert isinstance(WORKSPACE_ROOT, str)

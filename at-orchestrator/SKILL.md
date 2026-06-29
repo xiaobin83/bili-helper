@@ -155,7 +155,7 @@ uv run at-orchestrator reset --force
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `--db-path` | `str` | SQLite 数据库路径（默认 `.at-orchestrator/tasks.db`） |
+| `--db-path` | `str` | SQLite 数据库路径（默认 `~/.bili-helper/at-orchestrator.db`） |
 | `--auth-file` | `str` | 自定义凭证文件路径 |
 | `--env-prefix` | `str` | 环境变量前缀（默认 `BILI_`） |
 
