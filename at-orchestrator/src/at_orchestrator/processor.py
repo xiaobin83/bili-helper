@@ -138,8 +138,9 @@ class Processor:
                     results.append(task_result)
                     continue
 
-                # 2c. No LLM result yet — print prompt and skip, no DB changes
+                # 2c. No LLM result yet — mark classifying, print prompt, skip
                 if llm_result is None:
+                    await db.update_task_status(msg_id, source, "classifying")
                     print(f"[PROMPT] Task {msg_id}/{source}")
                     print(prompt)
                     task_result["status"] = "classifying"
