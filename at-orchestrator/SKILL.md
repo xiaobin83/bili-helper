@@ -122,6 +122,12 @@ uv run at-orchestrator fetch
 # 处理待处理消息（打印 prompt，等待 LLM 结果）
 uv run at-orchestrator process
 
+# 仅处理回复通知（source=reply），不处理 @消息
+uv run at-orchestrator process --source reply
+
+# 仅处理 @消息（source=at），不处理回复通知
+uv run at-orchestrator process --source at
+
 # 干跑：只打印 prompt，不分派不回复
 uv run at-orchestrator process --limit 1 --dry-run
 
@@ -165,6 +171,7 @@ uv run at-orchestrator reset --force
 |------|------|------|
 | `--limit` | `int` | 最多处理 N 条待处理任务（默认 1） |
 | `--dry-run` | `flag` | 干跑模式：打印分类 prompt，不执行分派和回复 |
+| `--source` | `str` | 按来源过滤：`"reply"`（回复通知）或 `"at"`（@消息），默认不过滤 |
 | `--apply-llm-result` | `str` | **应用 LLM 分类结果**：JSON 文件路径、`-` 从 stdin 读取、或 JSON 字符串 |
 
 ### reset 子命令参数

@@ -75,6 +75,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help=argparse.SUPPRESS,
     )
+    p_process.add_argument(
+        "--source",
+        type=str,
+        default=None,
+        choices=["reply", "at"],
+        help='Filter tasks by source type: "reply" or "at" (default: all)',
+    )
     p_process.set_defaults(_handler="process")
 
     # skill-prompt (Phase 2: skill prompt generation/application)
@@ -205,6 +212,7 @@ async def _handle_process(args: argparse.Namespace) -> None:
             limit=args.limit,
             dry_run=args.dry_run,
             llm_result=llm_result,
+            source=args.source,
         )
         for r in results:
             status = r["status"]

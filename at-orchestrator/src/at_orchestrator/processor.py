@@ -71,6 +71,7 @@ class Processor:
         limit: int = 1,
         dry_run: bool = False,
         llm_result: str | None = None,
+        source: str | None = None,
     ) -> list[dict[str, Any]]:
         """Phase 1: Classify pending tasks via LLM batch prompt.
 
@@ -97,6 +98,11 @@ class Processor:
             tasks = await db.get_pending_tasks(limit)
         if not tasks:
             return results
+
+        if source is not None:
+            tasks = [t for t in tasks if str(t.get("source", "")) == source]
+            if not tasks:
+                return results
 
         batch_prompt = classifier.build_batch_classification_prompt(tasks)
 
