@@ -25,6 +25,43 @@ VALID_SKILLS: frozenset[str] = frozenset({
     "unknown",
 })
 
+# ── Business ID → comment type mapping ────────────────────────────────
+# B站 uses different `type` values depending on the source:
+#   video (business_id=1)     → type=1
+#   dynamic (business_id=11)   → type=17
+#   article (business_id=17)   → type=17
+
+BUSINESS_ID_TO_TYPE: dict[int, int] = {
+    1: 1,
+    11: 17,
+    17: 17,
+}
+
+# ── Skill → CLI mapping ───────────────────────────────────────────────
+# Each entry defines how to invoke the skill via ``uv run``.
+#   command:      the skill CLI entry point name
+#   subcommand:   (optional) sub-command to pass after the entry point
+#   output_flag:  (optional) ``--output`` flag for skills that produce
+#                 an output file
+
+SKILL_CLI_MAP: dict[str, dict] = {
+    "video-analyzer": {
+        "command": "video-analyzer",
+        "output_flag": "--output",
+    },
+    "watch-later-recommender": {
+        "command": "watch-later-recommender",
+    },
+    "dyn-publisher": {
+        "command": "dyn-publisher",
+        "subcommand": "publish",
+    },
+    "fav-organizer": {
+        "command": "fav-organizer",
+        "subcommand": "classify",
+    },
+}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Enums
