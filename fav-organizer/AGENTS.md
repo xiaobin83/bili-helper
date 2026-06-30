@@ -26,16 +26,8 @@ src/
 ├── state_manager.py  # State file I/O
 ├── preview.py        # Markdown preview generation
 ├── confirm.py        # Interactive confirmation
-├── auth.py           # ⚠️ DEAD — re-export from bili_core.auth
-├── http_client.py    # ⚠️ DEAD — re-export from bili_core.http_client
-├── signing.py        # ⚠️ DEAD — re-export from bili_core.signing
-├── errors.py         # ⚠️ DEAD — re-export from bili_core.errors
 └── tests/            # 15 files, 310+ cases
 ```
-
-## DEAD CODE (CLEANUP NEEDED)
-
-- `src/auth.py`, `src/http_client.py`, `src/signing.py`, `src/errors.py` — re-export wrappers from `bili_core`, no longer imported anywhere. `main.py` imports directly from `bili_core.*`.
 
 ## NON-STANDARD: FLAT `src/` PACKAGE
 
@@ -52,4 +44,3 @@ Has `test_placeholder.py` (stub) and orphan `.pyc` for 3 deleted test files.
 
 - `main.py`: 1025 lines (4x over 250 LOC guideline)
 - `fav_api.py`: Legacy pre-bili-core client, now wraps `bili_core.fav.FavClient`
-- Uses `# noqa: F401` on 4 dead re-export files

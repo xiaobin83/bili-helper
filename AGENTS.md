@@ -182,7 +182,6 @@ signed = sign_params({"aid": 123})             # Wbi 签名
 | **Broad `except Exception:`** | video-analyzer `api_client.py` (6x), at-orchestrator `processor.py` (2x), bili-core `auth.py` (1x) | 🔴 High — silent error swallowing |
 | **`# type: ignore[...]`** | 19 instances, 14 in at-orchestrator/ | 🟡 Medium — type narrowing issues |
 | **fav-organizer flat `src/` package** | `packages = ["src"]` in pyproject.toml | 🟡 Medium — non-standard, import conflicts |
-| **fav-organizer dead re-export wrappers** | `src/auth.py`, `http_client.py`, `signing.py`, `errors.py` | 🟡 Medium — dead code from bili-core migration |
 | **Large modules** | fav-organizer `main.py` (1025 LOC), at-orchestrator `classifier.py` (457 LOC) | 🟡 Medium — exceeds 250 LOC guideline |
 | **`@pytest.mark.asyncio` redundant** | 171 instances despite `asyncio_mode = "auto"` | 🟢 Low — works but unnecessary |
 

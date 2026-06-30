@@ -85,19 +85,16 @@ export FAV_BILI_JCT="..."
 fav-organizer/
 ├── src/
 │   ├── main.py              # CLI 入口（3 个子命令）
-│   ├── auth.py              # 鉴权（文件/环境变量/二维码登录）
 │   ├── scanner.py           # 失效内容扫描
 │   ├── dedup.py             # 重复内容检测
-
 │   ├── planner.py           # 操作计划生成
 │   ├── executor.py          # 计划执行器
 │   ├── fav_api.py           # 收藏夹 API 客户端
 │   ├── video_api.py         # 视频信息 API（磁盘缓存）
-│   ├── http_client.py       # HTTP 客户端（鉴权、限流、重试）
-│   ├── signing.py           # Wbi 签名算法
 │   ├── state_manager.py     # 状态文件读写
 │   ├── models.py            # Pydantic 数据模型
-│   └── errors.py            # 自定义异常类
+│   └── preview.py           # Markdown preview generation
+├── tests/                   # 测试（310+ 用例）
 ├── tests/                   # 测试（310+ 用例）
 └── pyproject.toml
 ```
