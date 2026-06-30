@@ -3,6 +3,9 @@
 Uses stdlib ``sqlite3`` wrapped with ``asyncio.to_thread()`` for async
 compatibility.  WAL mode is enabled for concurrent access.
 
+On creation the database file is ``chmod``\'d to ``0o600`` (owner
+read/write only) to protect the user interaction data stored inside.
+
 Schema
 ------
 **tasks** — inbound AT/reply notifications from Bilibili.
@@ -22,6 +25,7 @@ All functions open a connection, execute, and close — no connection pooling.
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -129,6 +133,13 @@ async def init_db(db_path: str | Path) -> None:
             """)
 
             conn.commit()
+
+            # Restrict DB file permissions to owner-only (protects user data)
+            if _db_path and _db_path != ":memory:":
+                try:
+                    os.chmod(_db_path, 0o600)
+                except OSError:
+                    pass  # best-effort — may fail on some platforms or read-only fs
         finally:
             conn.close()
 

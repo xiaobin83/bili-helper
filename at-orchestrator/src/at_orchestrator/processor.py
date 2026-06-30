@@ -329,10 +329,7 @@ class Processor:
                             self._client, self._sender_uid, receiver_id, reply_content
                         )
                     else:
-                        logger.info(
-                            "PM session not available for %d → %d, falling back to comment",
-                            self._sender_uid, receiver_id,
-                        )
+                        logger.info("PM session not available, falling back to comment")
                         reply_method = "comment"
                         reply_ok = await replier.reply_comment(
                             self._client, task, reply_content
