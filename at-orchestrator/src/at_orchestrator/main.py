@@ -200,12 +200,12 @@ async def _handle_fetch(args: argparse.Namespace) -> None:
 
         if args.source in (None, "reply"):
             total += await _fetch_pages(
-                fetcher, source="reply", db_path=args.db_path, after_ts=after_ts
+                fetcher, source="reply", after_ts=after_ts
             )
 
         if args.source in (None, "at"):
             total += await _fetch_pages(
-                fetcher, source="at", db_path=args.db_path, after_ts=after_ts
+                fetcher, source="at", after_ts=after_ts
             )
 
         print(f"拉取完成: 新增 {total} 条")
@@ -217,7 +217,6 @@ async def _fetch_pages(
     fetcher: object,
     *,
     source: str,
-    db_path: str,
     after_ts: float | None,
 ) -> int:
     """Loop through API pages for *source*, breaking on dedup or is_end."""
@@ -225,8 +224,13 @@ async def _fetch_pages(
     cursor_id: int | None = cursor[0] if cursor else None
     cursor_time: float | None = cursor[1] if cursor else None
     inserted = 0
+    _MAX_PAGES = 10
 
-    while True:
+    print(f"[{source}] 起始 cursor: id={cursor_id}, time={cursor_time}")
+
+    for page in range(_MAX_PAGES):
+        prefix = f"[{source} page={page + 1}]"
+
         if source == "at":
             tasks = await fetcher.fetch_at_messages(cursor_id, cursor_time)  # type: ignore[union-attr]
             is_end = fetcher.at_is_end  # type: ignore[union-attr]
@@ -234,33 +238,57 @@ async def _fetch_pages(
             tasks = await fetcher.fetch_reply_messages(cursor_id, cursor_time)  # type: ignore[union-attr]
             is_end = fetcher.reply_is_end  # type: ignore[union-attr]
 
+        print(f"{prefix} 拉取 {len(tasks)} 条, cursor=[id={cursor_id}, time={cursor_time}]")
+
         if not tasks:
+            print(f"{prefix} 无数据, 停止")
             break
 
         # Dedup: if first msg already in DB, we've caught up to known data
         first_mid = tasks[0].get("msg_id")
         if isinstance(first_mid, int) and await at_db.task_exists(first_mid, source):
+            print(f"{prefix} 首条 msg_id={first_mid} 已入库, dedup 停止")
             break
 
         # After-date local filter
+        before_filter = len(tasks)
         if after_ts is not None:
             tasks = [t for t in tasks if float(t.get("msg_time", 0)) >= after_ts]
+            dropped = before_filter - len(tasks)
+            if dropped:
+                print(f"{prefix} after-date 过滤: {dropped}/{before_filter} 条被丢弃")
 
+        page_inserted = 0
         for task in tasks:
             if await at_db.insert_task(task):
-                inserted += 1
+                page_inserted += 1
+        inserted += page_inserted
+        print(f"{prefix} 入库 {page_inserted}/{len(tasks)} 条 (累计 {inserted})")
+
+        # If nothing was inserted on this page (all filtered), stop
+        if page_inserted == 0 and before_filter > 0:
+            print(f"{prefix} 本页 0 入库, 停止")
+            break
 
         # Advance cursor from the fetcher's parsed state
         if source == "at":
             cur = fetcher.at_cursor  # type: ignore[union-attr]
         else:
             cur = fetcher.reply_cursor  # type: ignore[union-attr]
-        cid, ctime = cur
-        if cid is not None and ctime is not None:
-            await at_db.set_cursor(source, cid, ctime)
-        cursor_id, cursor_time = cid, ctime
+        new_cid, new_ctime = cur
+        print(f"{prefix} 新 cursor: id={new_cid}, time={new_ctime}")
+
+        # Guard: non-advancing cursor means same page would repeat
+        if new_cid == cursor_id and new_ctime == cursor_time:
+            print(f"{prefix} cursor 未推进, 停止 (防死循环)")
+            break
+
+        if new_cid is not None and new_ctime is not None:
+            await at_db.set_cursor(source, new_cid, new_ctime)
+        cursor_id, cursor_time = new_cid, new_ctime
 
         if is_end:
+            print(f"{prefix} is_end=true, 停止")
             break
 
     return inserted

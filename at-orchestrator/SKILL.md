@@ -116,10 +116,6 @@ uv run at-orchestrator fetch --source reply
 
 # 只拉取 @消息
 uv run at-orchestrator fetch --source at
-
-# 只拉取指定日期之后的消息
-uv run at-orchestrator fetch --after-date 2026-06-30
-uv run at-orchestrator fetch --after-date "2026-06-30T00:00:00+08:00"
 ```
 
 从 B站 API `x/msgfeed/at` 和 `x/msgfeed/reply` 拉取新的 @ 消息和回复通知，自动存储到 SQLite 数据库。
@@ -128,10 +124,12 @@ uv run at-orchestrator fetch --after-date "2026-06-30T00:00:00+08:00"
 - 当前页第一条消息已在库中（dedup 断点）
 - API 返回 `cursor.is_end: true`（已到末尾）
 
+**不扩大日期范围**：`--after-date` 参数（默认昨天 00:00 本地时间）仅用于过滤旧游标返回的已入库历史消息，不要手动扩大日期范围去拉取更早的消息。fetch 的核心增量逻辑是 cursor 游标推进，没有拉到新消息说明 cursor 已到最新，不是日期参数的问题。
+
 | 参数 | 说明 |
 |------|------|
 | `--source reply\|at` | 只拉取一种来源，默认两者都拉 |
-| `--after-date DATE` | 只拉取该日期之后的消息（ISO 8601，默认昨天 00:00 本地时间） |
+| `--after-date DATE` | 只拉取该日期之后的消息（ISO 8601，默认昨天 00:00 本地时间）。**不要手动扩大此范围** |
 
 ### process — 处理消息
 
@@ -335,6 +333,7 @@ export BILI_BUVID3="..."  # 可选
 - at-orchestrator 本身不调用 LLM，LLM 分类由 Agent 在阶段 2 完成
 - 需要登录态，不支持游客模式
 - 评论回复需找到对应 `subject_id`（视频 / 动态 ID），缺失时回退到私信
+- **fetch 不扩大日期范围**：`--after-date` 默认值为昨天 00:00（本地时间），Agent 不要尝试扩大日期范围去拉取更早的历史消息。fetch 的增量机制基于 API cursor 游标，默认日期范围已足够覆盖新消息。没有拉到新消息即表示已是最新，无需调整参数重试
 
 ## 依赖安装
 
