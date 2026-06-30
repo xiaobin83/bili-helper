@@ -1,13 +1,57 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-06-25
-**Branch:** main (new)
+**Generated:** 2026-07-01
+**Branch:** main
 
 ## OVERVIEW
 
-B站 up主助手 —— 编写 OpenCode skills 辅助 B站 up主 完成各项日常工作。Skills 通过调用 B站 API（以 `viking://resources/xiaobin83/bili-apis` 为参考）实现数据获取、内容管理、数据分析等功能。
+B站 up主助手 —— 7-package monorepo of Python CLI tools that help B站 creators automate daily work. 6 skill packages + 1 shared library (`bili-core`).
 
-所有 skill 共享 `bili-core/` 基础库，提供统一鉴权、HTTP 客户端、签名算法和错误处理。开发新 skill 时**必须优先重用它**，不要自行实现重复功能。
+**Stack**: Python ≥3.12, hatchling build, uv package manager, httpx async HTTP, pydantic v2 models, pytest-asyncio tests.
+
+## STRUCTURE
+
+```
+bili-helper/
+├── bili-core/                 # Shared library — auth, HTTP, signing, errors
+│   └── src/bili_core/         #   8 modules: auth, http_client, signing, errors,
+│                              #   api_base, fav, search + rich __init__.py exports
+├── fav-organizer/             # Skill: favorites organizer (largest skill)
+│   └── src/                   #   ⚠️ Flat namespace (non-standard)
+├── dyn-publisher/             # Skill: B站 dynamic post publisher
+│   └── src/dyn_publisher/
+├── video-analyzer/            # Skill: 6-dimension video analysis
+│   └── src/video_analyzer/
+├── watch-later-recommender/   # Skill: LLM-powered video recommendation
+│   └── src/watch_later_recommender/
+├── at-orchestrator/           # Skill: @-mention orchestration (newest, most complex)
+│   └── src/at_orchestrator/   #   SQLite + LLM pipeline, 8 modules
+├── AGENTS.md                  # This file
+├── README.md                  # Usage instructions
+├── .omo/                      # OpenCode workflow artifacts
+├── .github/workflows/         # CI: opencode.yml (issue/PR comment trigger)
+└── .codegraph/                # Code intelligence index
+```
+
+## WHERE TO LOOK
+
+| Task | Location | Notes |
+|------|----------|-------|
+| Auth / credentials / QR login | `bili-core/src/bili_core/auth.py` | `get_credentials()`, `login_flow()` |
+| HTTP client (rate-limit, retry) | `bili-core/src/bili_core/http_client.py` | `BiliHTTPClient` |
+| Wbi signing | `bili-core/src/bili_core/signing.py` | `sign_params()`, 24h mixin key cache |
+| Error types | `bili-core/src/bili_core/errors.py` | `AuthError`, `CSRFError`, `RateLimitError` |
+| Favorites API | `bili-core/src/bili_core/fav.py` | `FavClient` (CRUD + clean) |
+| Video search API | `bili-core/src/bili_core/search.py` | `SearchClient` |
+| Base API client | `bili-core/src/bili_core/api_base.py` | `BaseBiliClient` (_get/_signed_get/_post) |
+| Favorites CLI (5 subcommands) | `fav-organizer/src/main.py` | 1025 lines — classify/plan/execute/delete-empty/list |
+| Favorites legacy API wrapper | `fav-organizer/src/fav_api.py` | Model-returning wrapper around bili-core |
+| Dynamic publisher CLI | `dyn-publisher/src/dyn_publisher/main.py` | publish/upload-image |
+| Video analysis CLI + API | `video-analyzer/src/video_analyzer/` | 6 analysis dimensions |
+| Recommendation pipeline | `watch-later-recommender/src/watch_later_recommender/` | 2-stage: prompt → LLM → apply |
+| @-mention orchestrator | `at-orchestrator/src/at_orchestrator/` | SQLite DB, LLM classifier, subprocess dispatch |
+| Skill definitions (OpenCode) | `*/SKILL.md` | 6 files, one per skill |
+| B站 API reference | `viking://resources/xiaobin83/bili-apis` | 30+ API doc categories
 
 ## REFERENCE: bili-apis
 
@@ -66,10 +110,10 @@ bili-apis/
 
 ### 提供的能力
 
-| 模块 | 能力 | 说�� |
+| 模块 | 能力 | 说明 |
 |------|------|------|
 | `bili_core.auth` | 凭证加载 + QR 登录 | `get_credentials()`: `.auth.json` → 环境变量 → 二维码扫码登录，自动保存凭证。提供 `Credentials` dataclass、`login_flow()`、`check_expired()` |
-| `bili_core.http_client` | HTTP 客户端 | `BiliHTTPClient`: 基于 curl_cffi 的 Chrome 131 指纹模拟，内置 2s 间隔限流、412/429 自动重试（3 次，120s 等待）、-101/-111 错误码转异常。提供 `DEFAULT_HEADERS`（完整反爬 header 集合）|
+| `bili_core.http_client` | HTTP 客户端 | `BiliHTTPClient`: httpx 异步客户端，Chrome 131 指纹模拟，内置 2s 间隔限流、412/429 自动重试（3 次，120s 等待）、-101/-111 错误码转异常。提供 `DEFAULT_HEADERS`（完整反爬 header 集合）|
 | `bili_core.signing` | Wbi 签名 | `sign_params()`: 自动获取 mixin key（24h 缓存），生成 `w_rid` + `wts` 签名参数。提供 `clear_cache()` |
 | `bili_core.errors` | 异常类 | `AuthError`（登录过期）、`CSRFError`（CSRF 校验失败）、`RateLimitError`（限流）、`BiliAPIError`（通用 API 错误）、`PublishError`（发布错误）及错误码常量 |
 
@@ -93,6 +137,54 @@ creds = get_credentials()                     # 自动 QR 登录
 client = BiliHTTPClient(sessdata=..., ...)     # 带防 WAF 的 HTTP 客户端
 signed = sign_params({"aid": 123})             # Wbi 签名
 ```
+
+## CONVENTIONS
+
+### Code style (from observation — no linting config exists)
+- `from __future__ import annotations` in every `.py` file (100% adoption)
+- `model_config = ConfigDict(extra="ignore")` on all Pydantic v2 models
+- `argparse` for CLI (not click/typer) — `build_parser()` → `def main()`
+- `async def` for all API calls, `asyncio.run()` bridge from sync CLI
+- `snake_case` modules, `PascalCase` classes, `UPPER_CASE` constants
+- Double-quote strings; 4-space indent; ~100-110 char line length (observed)
+- Comment section separators: `# ── title ──────────────────────`
+- Import order: stdlib → third-party → `bili_core` → intra-package
+
+### Package layout (new skill template)
+```
+[skill-name]/
+├── SKILL.md
+├── pyproject.toml          # hatchling, uv, entry via [project.scripts]
+├── src/[package_name]/
+│   ├── __init__.py
+│   ├── main.py             # CLI entry
+│   └── ...
+├── tests/
+│   └── test_*.py           # pytest + asyncio_mode = "auto"
+└── .gitignore
+```
+
+### Testing
+- pytest with `asyncio_mode = "auto"` (async test functions without decorator)
+- `unittest.mock` (AsyncMock, MagicMock, patch) — no pytest-mock
+- Test files: `test_<module>.py`, functions: `test_<behavior>`
+- `tmp_path` for temp files (57 uses across repo)
+
+### Package versioning & dependency
+- `>=3.12` Python, hatchling build, uv package manager
+- `bili-core = { path = "../bili-core", editable = true }` under `[tool.uv.sources]`
+- Dev deps: pytest, pytest-asyncio (do NOT dual-define in both optional-dependencies and dependency-groups)
+
+## ANTI-PATTERNS (THIS PROJECT)
+
+| Pattern | Where | Severity |
+|---------|-------|----------|
+| **Broad `except Exception:`** | video-analyzer `api_client.py` (6x), at-orchestrator `processor.py` (2x), bili-core `auth.py` (1x) | 🔴 High — silent error swallowing |
+| **`# type: ignore[...]`** | 19 instances, 14 in at-orchestrator/ | 🟡 Medium — type narrowing issues |
+| **fav-organizer flat `src/` package** | `packages = ["src"]` in pyproject.toml | 🟡 Medium — non-standard, import conflicts |
+| **fav-organizer dead re-export wrappers** | `src/auth.py`, `http_client.py`, `signing.py`, `errors.py` | 🟡 Medium — dead code from bili-core migration |
+| **Large modules** | fav-organizer `main.py` (1025 LOC), at-orchestrator `classifier.py` (457 LOC) | 🟡 Medium — exceeds 250 LOC guideline |
+| **`@pytest.mark.asyncio` redundant** | 171 instances despite `asyncio_mode = "auto"` | 🟢 Low — works but unnecessary |
 
 ## SKILL DEVELOPMENT CONVENTIONS
 
@@ -129,8 +221,17 @@ workspace/
 ## COMMANDS
 
 ```bash
-# Skill 安装与测试 (通过 OpenCode skill 系统)
-# 暂无项目级构建命令，skills 由 OpenCode 运行时加载
+# Each skill is a standalone package — run from its own directory
+cd <skill-dir> && uv sync             # Install deps
+cd <skill-dir> && uv run pytest -v    # Run tests
+cd <skill-dir> && uv run <entry> --help  # CLI help
+
+# Skill entry points
+uv run fav-organizer [classify|plan|execute|delete-empty|list]
+uv run dyn-publisher [publish|upload-image]
+uv run video-analyzer --bvid <BVID>
+uv run watch-later-recommender [--target|--apply-llm-result]
+uv run at-orchestrator [fetch|process|skill-prompt|reply|status|reset]
 ```
 
 ## NOTES
@@ -139,3 +240,6 @@ workspace/
 - gRPC 接口需要设备指纹模拟 (FawkesReq, Device, Network bin headers)，参考 `viking://resources/xiaobin83/bili-apis/grpc_api/readme.md`
 - 风控策略敏感: 频繁请求可能触发验证码或封禁，skill 需内置请求频率控制
 - 视频流/直播流 URL 具有时效性，需实时获取
+- No CI test runner (only opencode.yml for comment-triggered AI runs)
+- No linting/formatting config (ruff/pyright/pre-commit not set up)
+- Subdirectory AGENTS.md files exist for: `bili-core/`, `fav-organizer/`, `at-orchestrator/`
