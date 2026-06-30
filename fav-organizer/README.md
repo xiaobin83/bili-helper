@@ -11,7 +11,7 @@ uv sync
 # 阶段 1: 扫描收藏夹，准备数据
 uv run fav-organizer classify --folder "默认收藏夹"
 
-# 阶段 2: （Agent 或用户填写 .fav-organizer/classification_result.json）
+# 阶段 2: （Agent 或用户填写 ~/.bili-helper/fav-organizer/classification_result.json）
 
 # 阶段 3: 生成整理计划（可反复调整分类后重新运行）
 uv run fav-organizer plan
@@ -25,6 +25,8 @@ uv run fav-organizer execute
 ```
 classify → state.json + classification_result.json → plan → plan.json → execute
               ↑________ Agent 填写 LLM 分类 ___________↑
+
+所有中间文件存储在 `~/.bili-helper/fav-organizer/` 目录。
 ```
 
 ### classify — 数据采集
@@ -72,10 +74,10 @@ export FAV_BILI_JCT="..."
 
 | 文件 | 说明 |
 |------|------|
-| `.fav-organizer/state.json` | 扫描状态（文件夹、失效项、内容列表） |
-| `.fav-organizer/classification_result.json` | LLM 分类结果（Agent 填写） |
-| `.fav-organizer/plan.json` | 可执行计划 |
-| `.fav-organizer/video_cache.json` | 视频信息缓存（30 天 TTL） |
+| `~/.bili-helper/fav-organizer/state.json` | 扫描状态（文件夹、失效项、内容列表） |
+| `~/.bili-helper/fav-organizer/classification_result.json` | LLM 分类结果（Agent 填写） |
+| `~/.bili-helper/fav-organizer/plan.json` | 可执行计划 |
+| `~/.bili-helper/fav-organizer/video_cache.json` | 视频信息缓存（30 天 TTL） |
 
 ## 项目结构
 

@@ -1,6 +1,6 @@
 """Video info API wrapper with disk-backed cache (30-day TTL).
 
-Caches results to ``.fav-organizer/video_cache.json`` so repeated
+Caches results to ``~/.bili-helper/fav-organizer/video_cache.json`` so repeated
 classify runs don't refetch video metadata.  Cache can be cleared
 via ``StateManager.clear_video_cache()``.
 """

@@ -120,7 +120,7 @@ uv run fav-organizer delete-empty
 
 ## 中间文件格式
 
-所有中间数据存储在 `.fav-organizer/` 目录（gitignored）：
+所有中间数据存储在 `~/.bili-helper/fav-organizer/` 目录：
 
 | 文件 | 产生于 | 消费于 | 说明 |
 |------|--------|--------|------|

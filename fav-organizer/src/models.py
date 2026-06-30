@@ -162,9 +162,9 @@ class InvalidItemEntry(BaseModel):
 class StateData(BaseModel):
     """Complete state produced by the ``classify`` command.
 
-    Serialized to ``.fav-organizer/state.json``.  Contains everything
-    the ``plan`` command needs to build an OrganizePlan once LLM
-    classifications have been filled in.
+    Serialized to ``~/.bili-helper/fav-organizer/state.json``.  Contains
+    everything the ``plan`` command needs to build an OrganizePlan once
+    LLM classifications have been filled in.
     """
 
     version: str = "1.0"
@@ -188,7 +188,7 @@ class ClassificationEntry(BaseModel):
 class ClassificationResultList(BaseModel):
     """User/agent-filled LLM classifications.
 
-    Serialized to ``.fav-organizer/classification_result.json``.
+    Serialized to ``~/.bili-helper/fav-organizer/classification_result.json``.
     The ``plan`` command reads this and merges with state.json to build
     the OrganizePlan.
     """
@@ -201,7 +201,7 @@ class ClassificationResultList(BaseModel):
 class BatchMeta(BaseModel):
     """Pagination tracker for auto-batching when total videos exceed 50.
 
-    Serialized to ``.fav-organizer/batch_meta.json``.  When present,
+    Serialized to ``~/.bili-helper/fav-organizer/batch_meta.json``.  When present,
     ``classify`` skips scanning and picks the next 50-item slice from
     the existing state.json.  ``execute`` advances the offset on success.
     """
@@ -259,8 +259,8 @@ class PlanDeleteEntry(BaseModel):
 class PlanFile(BaseModel):
     """Serializable organize plan for the ``execute`` command.
 
-    Serialized to ``.fav-organizer/plan.json``.  Uses simple types
-    (no nested Folder/FavoritedItem unions) for unambiguous
+    Serialized to ``~/.bili-helper/fav-organizer/plan.json``.  Uses simple
+    types (no nested Folder/FavoritedItem unions) for unambiguous
     deserialization.
     """
 

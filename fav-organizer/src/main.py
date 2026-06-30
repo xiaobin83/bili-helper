@@ -983,14 +983,14 @@ def cli() -> None:
     p_plan = sub.add_parser("plan", help="读取分类结果，生成整理计划")
     p_plan.add_argument(
         "--classification", type=str, metavar="PATH",
-        help="分类结果 JSON 文件路径（默认: .fav-organizer/classification_result.json）",
+        help="分类结果 JSON 文件路径（默认: ~/.bili-helper/fav-organizer/classification_result.json）",
     )
 
     # execute
     p_execute = sub.add_parser("execute", help="执行整理计划")
     p_execute.add_argument(
         "--plan", type=str, metavar="PATH",
-        help="计划 JSON 文件路径（默认: .fav-organizer/plan.json）",
+        help="计划 JSON 文件路径（默认: ~/.bili-helper/fav-organizer/plan.json）",
     )
 
     sub.add_parser("delete-empty", help="删除所有空收藏夹（跳过默认收藏夹）")
