@@ -1,6 +1,6 @@
 """State file manager for fav-organizer pipeline.
 
-Manages the ``.fav-organizer/`` directory and its JSON files:
+Manages the ``~/.bili-helper/fav-organizer/`` directory and its JSON files:
 
 - ``state.json`` — produced by ``classify``, consumed by ``plan``
 - ``classification_result.json`` — filled by agent, consumed by ``plan``
@@ -31,10 +31,15 @@ from .models import (
 
 
 class StateManager:
-    """Read/write pipeline state files under ``.fav-organizer/``."""
+    """Read/write pipeline state files under ``~/.bili-helper/fav-organizer/``.
 
-    # Directory name relative to skill root (parent of src/)
-    DIR_NAME = ".fav-organizer"
+    Previously stored under ``.fav-organizer/`` in the project root — moved
+    to the shared ``~/.bili-helper/`` directory to avoid committing user data
+    (video titles, BVIDs, classification categories) into git.
+    """
+
+    # Subdirectory under ~/.bili-helper/
+    DIR_NAME = "fav-organizer"
 
     FILE_STATE = "state.json"
     FILE_CLASSIFICATION = "classification_result.json"
@@ -51,13 +56,16 @@ class StateManager:
 
     @staticmethod
     def _resolve_root() -> Path:
-        """Resolve the skill root directory (parent of src/)."""
-        src_dir = Path(__file__).resolve().parent  # .../fav-organizer/src/
-        return src_dir.parent  # .../fav-organizer/
+        """Resolve the data root directory (~/.bili-helper/).
+
+        All bili-helper tools share this directory for persistent state,
+        keeping user data out of the git-tracked project tree.
+        """
+        return Path.home() / ".bili-helper"
 
     @property
     def state_dir(self) -> Path:
-        """Return the ``.fav-organizer/`` directory path (creates if missing)."""
+        """Return the ``~/.bili-helper/fav-organizer/`` directory path (creates if missing)."""
         d = self._root / self.DIR_NAME
         d.mkdir(parents=True, exist_ok=True)
         return d
