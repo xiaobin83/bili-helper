@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from src.models import FavoritedItem, Operation, OrganizePlan
+from .models import FavoritedItem, Operation, OrganizePlan
 
 
 def format_preview(plan: OrganizePlan) -> str:

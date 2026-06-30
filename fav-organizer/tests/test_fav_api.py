@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.fav_api import FavAPI
-from src.models import Folder, FavoritedItem
+from src.fav_organizer.fav_api import FavAPI
+from src.fav_organizer.models import Folder, FavoritedItem
 
 
 # ---------------------------------------------------------------------------

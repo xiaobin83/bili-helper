@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from src.dedup import detect_duplicates
-from src.models import Folder
+from src.fav_organizer.dedup import detect_duplicates
+from src.fav_organizer.models import Folder
 
 
 # ---------------------------------------------------------------------------

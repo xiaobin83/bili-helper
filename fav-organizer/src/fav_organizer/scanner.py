@@ -11,8 +11,8 @@ Usage::
 
 from __future__ import annotations
 
-from src.fav_api import FavAPI
-from src.models import Folder, FavoritedItem
+from .fav_api import FavAPI
+from .models import Folder, FavoritedItem
 
 # ──────────────────────────────────────────────────────────────────────
 # Public API

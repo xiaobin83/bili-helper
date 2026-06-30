@@ -19,14 +19,14 @@ import pytest
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from src.main import (
+from src.fav_organizer.main import (
     cli,
     cmd_classify,
     cmd_plan,
     cmd_execute,
     generate_preview,
 )
-from src.models import (
+from src.fav_organizer.models import (
     ClassificationEntry,
     ClassificationResultList,
     FavoritedItem,
@@ -40,7 +40,7 @@ from src.models import (
     PlanResourceRef,
     StateData,
 )
-from src.state_manager import StateManager
+from src.fav_organizer.state_manager import StateManager
 
 
 # ---------------------------------------------------------------------------
@@ -89,9 +89,9 @@ class TestCli:
     def test_classify_subcommand(self):
         """classify --folder 'xxx' triggers cmd_classify."""
         with (
-            patch("src.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
-            patch("src.main.sys.exit"),
-            patch("src.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹"]),
+            patch("src.fav_organizer.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
+            patch("src.fav_organizer.main.sys.exit"),
+            patch("src.fav_organizer.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹"]),
         ):
             mock_cmd.return_value = 0
             cli()
@@ -102,9 +102,9 @@ class TestCli:
     def test_classify_all(self):
         """classify --all triggers cmd_classify with scope all."""
         with (
-            patch("src.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
-            patch("src.main.sys.exit"),
-            patch("src.main.sys.argv", ["fav-organizer", "classify", "--all"]),
+            patch("src.fav_organizer.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
+            patch("src.fav_organizer.main.sys.exit"),
+            patch("src.fav_organizer.main.sys.argv", ["fav-organizer", "classify", "--all"]),
         ):
             mock_cmd.return_value = 0
             cli()
@@ -115,9 +115,9 @@ class TestCli:
     def test_plan_subcommand(self):
         """plan subcommand triggers cmd_plan."""
         with (
-            patch("src.main.cmd_plan") as mock_cmd,
-            patch("src.main.sys.exit"),
-            patch("src.main.sys.argv", ["fav-organizer", "plan"]),
+            patch("src.fav_organizer.main.cmd_plan") as mock_cmd,
+            patch("src.fav_organizer.main.sys.exit"),
+            patch("src.fav_organizer.main.sys.argv", ["fav-organizer", "plan"]),
         ):
             mock_cmd.return_value = 0
             cli()
@@ -126,9 +126,9 @@ class TestCli:
     def test_execute_subcommand(self):
         """execute subcommand triggers cmd_execute."""
         with (
-            patch("src.main.cmd_execute", new_callable=AsyncMock) as mock_cmd,
-            patch("src.main.sys.exit"),
-            patch("src.main.sys.argv", ["fav-organizer", "execute"]),
+            patch("src.fav_organizer.main.cmd_execute", new_callable=AsyncMock) as mock_cmd,
+            patch("src.fav_organizer.main.sys.exit"),
+            patch("src.fav_organizer.main.sys.argv", ["fav-organizer", "execute"]),
         ):
             mock_cmd.return_value = 0
             cli()
@@ -137,9 +137,9 @@ class TestCli:
     def test_classify_with_count(self):
         """--count N is forwarded to cmd_classify."""
         with (
-            patch("src.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
-            patch("src.main.sys.exit"),
-            patch("src.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹", "--count", "10"]),
+            patch("src.fav_organizer.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
+            patch("src.fav_organizer.main.sys.exit"),
+            patch("src.fav_organizer.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹", "--count", "10"]),
         ):
             mock_cmd.return_value = 0
             cli()
@@ -150,9 +150,9 @@ class TestCli:
     def test_classify_with_dedup(self):
         """--dedup is forwarded to cmd_classify."""
         with (
-            patch("src.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
-            patch("src.main.sys.exit"),
-            patch("src.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹", "--dedup"]),
+            patch("src.fav_organizer.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
+            patch("src.fav_organizer.main.sys.exit"),
+            patch("src.fav_organizer.main.sys.argv", ["fav-organizer", "classify", "--folder", "默认收藏夹", "--dedup"]),
         ):
             mock_cmd.return_value = 0
             cli()
@@ -163,8 +163,8 @@ class TestCli:
     def test_no_subcommand_shows_help(self):
         """No subcommand prints help."""
         with (
-            patch("src.main.sys.exit") as mock_exit,
-            patch("src.main.sys.argv", ["fav-organizer"]),
+            patch("src.fav_organizer.main.sys.exit") as mock_exit,
+            patch("src.fav_organizer.main.sys.argv", ["fav-organizer"]),
         ):
             cli()
             mock_exit.assert_called_once_with(1)
@@ -212,7 +212,7 @@ class TestCmdPlan:
             patch.object(StateManager, "load_state", return_value=state),
             patch.object(StateManager, "load_classification", return_value=classification),
             patch.object(StateManager, "save_plan"),
-            patch("src.main.generate_preview", return_value="PREVIEW"),
+            patch("src.fav_organizer.main.generate_preview", return_value="PREVIEW"),
             patch("builtins.print"),
         ):
             result = cmd_plan()

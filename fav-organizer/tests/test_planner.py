@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.planner import build_plan
-from src.models import (
+from src.fav_organizer.planner import build_plan
+from src.fav_organizer.models import (
     ClassificationResult,
     DuplicateGroup,
     FavoritedItem,

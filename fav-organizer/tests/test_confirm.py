@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.confirm import confirm_execution
+from src.fav_organizer.confirm import confirm_execution
 
 
 class TestConfirmExecution:

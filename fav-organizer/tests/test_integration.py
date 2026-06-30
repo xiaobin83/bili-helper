@@ -17,8 +17,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from bili_core.auth import Credentials as AuthCredentialsDC
-from src.main import cmd_classify, cmd_plan, cmd_execute, generate_preview
-from src.models import (
+from src.fav_organizer.main import cmd_classify, cmd_plan, cmd_execute, generate_preview
+from src.fav_organizer.models import (
     ClassificationEntry,
     ClassificationResult,
     ClassificationResultList,
@@ -34,7 +34,7 @@ from src.models import (
     PlanResourceRef,
     StateData,
 )
-from src.state_manager import StateManager
+from src.fav_organizer.state_manager import StateManager
 
 
 # ---------------------------------------------------------------------------
@@ -84,14 +84,14 @@ class TestCmdClassify:
         mock_fav.get_all_contents = AsyncMock(return_value=items)
 
         with (
-            patch("src.main.get_credentials", return_value=_credentials()),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav),
-            patch("src.main.VideoInfoAPI") as mock_video_cls,
-            patch("src.main.sign_params"),
-            patch("src.main.scan_invalid", return_value=[]),
-            patch("src.main.detect_duplicates", return_value=[]),
+            patch("src.fav_organizer.main.get_credentials", return_value=_credentials()),
+            patch("src.fav_organizer.main.check_expired", return_value=False),
+            patch("src.fav_organizer.main.BiliHTTPClient") as mock_http_cls,
+            patch("src.fav_organizer.main.FavAPI", return_value=mock_fav),
+            patch("src.fav_organizer.main.VideoInfoAPI") as mock_video_cls,
+            patch("src.fav_organizer.main.sign_params"),
+            patch("src.fav_organizer.main.scan_invalid", return_value=[]),
+            patch("src.fav_organizer.main.detect_duplicates", return_value=[]),
             patch.object(StateManager, "save_state"),
             patch.object(StateManager, "save_classification"),
         ):
@@ -111,11 +111,11 @@ class TestCmdClassify:
         mock_fav.list_all_folders = AsyncMock(return_value=[_folder(1, title="默认收藏夹")])
 
         with (
-            patch("src.main.get_credentials", return_value=_credentials()),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav),
-            patch("src.main.sign_params"),
+            patch("src.fav_organizer.main.get_credentials", return_value=_credentials()),
+            patch("src.fav_organizer.main.check_expired", return_value=False),
+            patch("src.fav_organizer.main.BiliHTTPClient") as mock_http_cls,
+            patch("src.fav_organizer.main.FavAPI", return_value=mock_fav),
+            patch("src.fav_organizer.main.sign_params"),
         ):
             mock_http_cls.return_value = _make_http_mock()
             result = await cmd_classify(scope_kind="folder", scope_value="不存在的文件夹")
@@ -128,11 +128,11 @@ class TestCmdClassify:
         mock_fav.list_all_folders = AsyncMock(return_value=[])
 
         with (
-            patch("src.main.get_credentials", return_value=_credentials()),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav),
-            patch("src.main.sign_params"),
+            patch("src.fav_organizer.main.get_credentials", return_value=_credentials()),
+            patch("src.fav_organizer.main.check_expired", return_value=False),
+            patch("src.fav_organizer.main.BiliHTTPClient") as mock_http_cls,
+            patch("src.fav_organizer.main.FavAPI", return_value=mock_fav),
+            patch("src.fav_organizer.main.sign_params"),
         ):
             mock_http_cls.return_value = _make_http_mock()
             result = await cmd_classify(scope_kind="all", scope_value="全部")
@@ -142,8 +142,8 @@ class TestCmdClassify:
     async def test_classify_expired_auth(self):
         """Expired SESSDATA → error exit 1."""
         with (
-            patch("src.main.get_credentials", return_value=_credentials()),
-            patch("src.main.check_expired", return_value=True),
+            patch("src.fav_organizer.main.get_credentials", return_value=_credentials()),
+            patch("src.fav_organizer.main.check_expired", return_value=True),
         ):
             result = await cmd_classify(scope_kind="all", scope_value="全部")
             assert result == 1
@@ -283,12 +283,12 @@ class TestCmdExecute:
 
         with (
             patch.object(StateManager, "load_plan", return_value=pf),
-            patch("src.main.get_credentials", return_value=_credentials()),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav),
-            patch("src.main.sign_params"),
-            patch("src.main.confirm_execution", return_value=True),
+            patch("src.fav_organizer.main.get_credentials", return_value=_credentials()),
+            patch("src.fav_organizer.main.check_expired", return_value=False),
+            patch("src.fav_organizer.main.BiliHTTPClient") as mock_http_cls,
+            patch("src.fav_organizer.main.FavAPI", return_value=mock_fav),
+            patch("src.fav_organizer.main.sign_params"),
+            patch("src.fav_organizer.main.confirm_execution", return_value=True),
         ):
             mock_http_cls.return_value = _make_http_mock()
             result = await cmd_execute()
@@ -304,7 +304,7 @@ class TestCmdExecute:
 
         with (
             patch.object(StateManager, "load_plan", return_value=pf),
-            patch("src.main.confirm_execution"),
+            patch("src.fav_organizer.main.confirm_execution"),
         ):
             result = await cmd_execute()
             assert result == 0
@@ -323,8 +323,8 @@ class TestCmdExecute:
 
         with (
             patch.object(StateManager, "load_plan", return_value=pf),
-            patch("src.main.confirm_execution", return_value=False),
-            patch("src.main.get_credentials"),
+            patch("src.fav_organizer.main.confirm_execution", return_value=False),
+            patch("src.fav_organizer.main.get_credentials"),
         ):
             result = await cmd_execute()
             assert result == 0
@@ -344,12 +344,12 @@ class TestCmdExecute:
 
         with (
             patch.object(StateManager, "load_plan", return_value=pf),
-            patch("src.main.get_credentials", return_value=_credentials()),
-            patch("src.main.check_expired", return_value=False),
-            patch("src.main.BiliHTTPClient") as mock_http_cls,
-            patch("src.main.FavAPI", return_value=mock_fav),
-            patch("src.main.sign_params"),
-            patch("src.main.confirm_execution", return_value=True),
+            patch("src.fav_organizer.main.get_credentials", return_value=_credentials()),
+            patch("src.fav_organizer.main.check_expired", return_value=False),
+            patch("src.fav_organizer.main.BiliHTTPClient") as mock_http_cls,
+            patch("src.fav_organizer.main.FavAPI", return_value=mock_fav),
+            patch("src.fav_organizer.main.sign_params"),
+            patch("src.fav_organizer.main.confirm_execution", return_value=True),
         ):
             mock_http_cls.return_value = _make_http_mock()
             result = await cmd_execute()

@@ -38,10 +38,10 @@ dev = [
 ]
 
 [project.scripts]
-fav-organizer = "src.main:cli"
+fav-organizer = "src.fav_organizer.main:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["src/fav_organizer"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

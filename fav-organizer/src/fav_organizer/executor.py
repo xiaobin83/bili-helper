@@ -13,7 +13,7 @@ Usage::
 
 from __future__ import annotations
 
-from src.models import (
+from .models import (
     ExecutionDetail,
     ExecutionReport,
     FavoritedItem,

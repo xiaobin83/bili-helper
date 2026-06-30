@@ -6,7 +6,7 @@ Covers serialization, deserialization, property behavior, and default values.
 import pytest
 from pydantic import ValidationError
 
-from src.models import (
+from src.fav_organizer.models import (
     ClassificationResult,
     Credentials,
     DuplicateGroup,

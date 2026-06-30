@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.executor import execute_plan
-from src.models import (
+from src.fav_organizer.executor import execute_plan
+from src.fav_organizer.models import (
     ExecutionReport,
     FavoritedItem,
     Folder,

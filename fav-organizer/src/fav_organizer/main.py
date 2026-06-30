@@ -28,10 +28,10 @@ from bili_core.auth import check_expired, get_credentials
 from bili_core.auth import DEFAULT_AUTH_FILE
 from bili_core.http_client import BiliHTTPClient
 from bili_core.signing import sign_params
-from src.confirm import confirm_execution
-from src.dedup import detect_duplicates
-from src.fav_api import FavAPI
-from src.models import (
+from .confirm import confirm_execution
+from .dedup import detect_duplicates
+from .fav_api import FavAPI
+from .models import (
     BatchMeta,
     ClassificationEntry,
     ClassificationResult,
@@ -47,10 +47,10 @@ from src.models import (
     PlanResourceRef,
     StateData,
 )
-from src.planner import build_plan
-from src.scanner import scan_invalid
-from src.state_manager import StateManager
-from src.video_api import VideoInfoAPI
+from .planner import build_plan
+from .scanner import scan_invalid
+from .state_manager import StateManager
+from .video_api import VideoInfoAPI
 
 # ======================================================================
 # Preview / Markdown generation (used by "plan" command)

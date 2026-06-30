@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from src.scanner import scan_invalid
-from src.models import Folder, FavoritedItem
+from src.fav_organizer.scanner import scan_invalid
+from src.fav_organizer.models import Folder, FavoritedItem
 
 
 # ---------------------------------------------------------------------------

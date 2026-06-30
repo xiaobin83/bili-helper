@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from src.preview import format_preview
-from src.models import FavoritedItem, Folder, Operation, OrganizePlan
+from src.fav_organizer.preview import format_preview
+from src.fav_organizer.models import FavoritedItem, Folder, Operation, OrganizePlan
 
 
 # ---------------------------------------------------------------------------
