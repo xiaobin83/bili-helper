@@ -5,9 +5,6 @@ __pycache__/
 # uv
 uv.lock
 
-# Database
-.at-orchestrator/
-
 # IDE
 .idea/
 .vscode/

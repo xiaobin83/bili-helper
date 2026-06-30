@@ -3,3 +3,6 @@
 
 # 登录凭证（SESSDATA / bili_jct）
 .auth.json
+
+# 收藏夹整理中间文件（已迁移至 ~/.bili-helper/fav-organizer/）
+.fav-organizer/
