@@ -184,13 +184,13 @@ uv run watch-later-recommender --count 8
 | `--folder-name` | `str` | 覆盖 LLM 选择的收藏夹名称（仅阶段 2 生效） |
 | `--dry-run` | `flag` | 阶段 2 中预览 LLM 推荐结果，不实际添加 |
 | `--init-prefs` | `flag` | 初始化偏好配置文件（创建模板） |
-| `--prefs` | `str` | 自定义偏好配置文件路径（默认 `~/.bili-helper/.watch-later-prefs.yaml`） |
+| `--prefs` | `str` | 自定义偏好配置文件路径（默认 `~/.bili-helper/watch-later-prefs.yaml`） |
 | `--auth-file` | `str` | 自定义凭证文件路径 |
 | `--env-prefix` | `str` | 环境变量前缀（默认 `BILI_`） |
 
 ### 偏好配置指南
 
-偏好配置文件为 YAML 格式，位于 `~/.bili-helper/.watch-later-prefs.yaml`。首次使用请先运行 `--init-prefs` 生成模板。
+偏好配置文件为 YAML 格式，位于 `~/.bili-helper/watch-later-prefs.yaml`。首次使用请先运行 `--init-prefs` 生成模板。
 
 ```yaml
 # 稍后再看智能推荐 - 内容偏好配置

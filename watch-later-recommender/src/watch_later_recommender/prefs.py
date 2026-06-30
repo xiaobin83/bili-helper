@@ -1,7 +1,7 @@
 """Preference configuration schema and loader for watch-later-recommender.
 
 Reads user content preferences from a YAML config file at
-``~/.bili-helper/.watch-later-prefs.yaml`` and validates with Pydantic.
+``~/.bili-helper/watch-later-prefs.yaml`` and validates with Pydantic.
 """
 
 from pathlib import Path
@@ -10,7 +10,7 @@ import yaml
 
 from watch_later_recommender.models import CategoryPref, PrefsConfig
 
-DEFAULT_PREFS_PATH = Path.home() / ".bili-helper" / ".watch-later-prefs.yaml"
+DEFAULT_PREFS_PATH = Path.home() / ".bili-helper" / "watch-later-prefs.yaml"
 
 PREF_TEMPLATE = """# 稍后再看智能推荐 - 内容偏好配置
 # B站分区 ID 参考: https://api.bilibili.com/x/web-interface/ranking/v2?rid=
