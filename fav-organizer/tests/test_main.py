@@ -91,20 +91,7 @@ class TestCli:
             mock_cmd.return_value = 0
             cli()
             mock_cmd.assert_called_once_with(
-                scope_kind="folder", scope_value="默认收藏夹", clear_cache=False, count=None, dedup=False
-            )
-
-    def test_classify_all(self):
-        """classify --all triggers cmd_classify with scope all."""
-        with (
-            patch("src.fav_organizer.main.cmd_classify", new_callable=AsyncMock) as mock_cmd,
-            patch("src.fav_organizer.main.sys.exit"),
-            patch("src.fav_organizer.main.sys.argv", ["fav-organizer", "classify", "--all"]),
-        ):
-            mock_cmd.return_value = 0
-            cli()
-            mock_cmd.assert_called_once_with(
-                scope_kind="all", scope_value="全部", clear_cache=False, count=None, dedup=False
+                folder_name="默认收藏夹", clear_cache=False, count=None, dedup=False
             )
 
     def test_plan_subcommand(self):
@@ -139,7 +126,7 @@ class TestCli:
             mock_cmd.return_value = 0
             cli()
             mock_cmd.assert_called_once_with(
-                scope_kind="folder", scope_value="默认收藏夹", clear_cache=False, count=10, dedup=False
+                folder_name="默认收藏夹", clear_cache=False, count=10, dedup=False
             )
 
     def test_classify_with_dedup(self):
@@ -152,7 +139,7 @@ class TestCli:
             mock_cmd.return_value = 0
             cli()
             mock_cmd.assert_called_once_with(
-                scope_kind="folder", scope_value="默认收藏夹", clear_cache=False, count=None, dedup=True
+                folder_name="默认收藏夹", clear_cache=False, count=None, dedup=True
             )
 
     def test_no_subcommand_shows_help(self):

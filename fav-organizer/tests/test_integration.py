@@ -102,7 +102,7 @@ class TestCmdClassify:
             mock_video.get_video_info = AsyncMock(return_value={"desc": "测试简介", "tname": "科技"})
             mock_video_cls.return_value = mock_video
 
-            result = await cmd_classify(scope_kind="folder", scope_value="默认收藏夹")
+            result = await cmd_classify(folder_name="默认收藏夹")
             assert result == 0
 
     @pytest.mark.asyncio
@@ -119,12 +119,12 @@ class TestCmdClassify:
             patch("src.fav_organizer.main.sign_params"),
         ):
             mock_http_cls.return_value = _make_http_mock()
-            result = await cmd_classify(scope_kind="folder", scope_value="不存在的文件夹")
+            result = await cmd_classify(folder_name="不存在的文件夹")
             assert result == 1
 
     @pytest.mark.asyncio
     async def test_classify_empty_folders(self):
-        """No folders → friendly message, exit 0."""
+        """No folders → friendly message, exit 0 (no error)."""
         mock_fav = MagicMock()
         mock_fav.list_all_folders = AsyncMock(return_value=[])
 
@@ -136,7 +136,7 @@ class TestCmdClassify:
             patch("src.fav_organizer.main.sign_params"),
         ):
             mock_http_cls.return_value = _make_http_mock()
-            result = await cmd_classify(scope_kind="all", scope_value="全部")
+            result = await cmd_classify(folder_name="默认收藏夹")
             assert result == 0
 
     @pytest.mark.asyncio
@@ -146,7 +146,7 @@ class TestCmdClassify:
             patch("src.fav_organizer.main.get_credentials", return_value=_credentials()),
             patch("src.fav_organizer.main.check_expired", return_value=True),
         ):
-            result = await cmd_classify(scope_kind="all", scope_value="全部")
+            result = await cmd_classify(folder_name="默认收藏夹")
             assert result == 1
 
 

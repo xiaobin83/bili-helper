@@ -5,7 +5,6 @@ Three independent commands::
 
     # Phase 1: scan & prepare (requires auth)
     uv run fav-organizer classify --folder "默认收藏夹"
-    uv run fav-organizer classify --all [--clear-cache]
 
     # Phase 2: plan (no auth — reads local state + classifications)
     uv run fav-organizer plan
@@ -103,8 +102,7 @@ async def _collect_until_count(
 
 async def cmd_classify(
     *,
-    scope_kind: str,
-    scope_value: str,
+    folder_name: str,
     clear_cache: bool = False,
     count: int | None = None,
     dedup: bool = False,
@@ -112,7 +110,7 @@ async def cmd_classify(
     """Scan favorites, detect invalid/duplicate, and prepare state for LLM classification.
 
     1. Auth
-    2. List folders (filtered by scope)
+    2. List folders (filtered by name)
     3. Scan invalid items
     4. Detect duplicates
     5. Collect valid items with folder mapping
@@ -149,23 +147,19 @@ async def cmd_classify(
             print("没有找到收藏夹")
             return 0
 
-        # Filter by scope
-        if scope_kind == "folder":
-            folders = [
-                f for f in all_folders
-                if f.title == scope_value and f.title != "稍后再看"
-            ]
-            if not folders:
-                print(f"❌ 未找到收藏夹 '{scope_value}'")
-                available = [f.title for f in all_folders if f.title != "稍后再看"]
-                if available:
-                    print(f"可用的收藏夹: {', '.join(available)}")
-                return 1
-        else:
-            # --all
-            folders = [f for f in all_folders if f.title != "稍后再看"]
+        # Filter by folder name
+        folders = [
+            f for f in all_folders
+            if f.title == folder_name and f.title != "稍后再看"
+        ]
+        if not folders:
+            print(f"❌ 未找到收藏夹 '{folder_name}'")
+            available = [f.title for f in all_folders if f.title != "稍后再看"]
+            if available:
+                print(f"可用的收藏夹: {', '.join(available)}")
+            return 1
 
-        print(f"📂 整理范围: {scope_value} ({len(folders)} 个收藏夹)")
+        print(f"📂 整理范围: {folder_name} ({len(folders)} 个收藏夹)")
 
         # Scan invalid
         invalid_entries: list[InvalidItemEntry] = []
@@ -229,9 +223,24 @@ async def cmd_classify(
         if count is not None:
             print(f"  发现 {len(invalid_entries)} 个失效内容（来自已扫描页面）")
 
-        # Fetch video info to enrich items with descriptions
-        print(f"正在获取视频信息 ({len(all_items)} 个)...")
-        video_items = [it for it in all_items if it.type == 2 and it.bvid]
+        # Fetch video info to enrich items with descriptions.
+        # Skip items from the default folder — descriptions are not
+        # needed for classification of its catch-all contents.
+        default_folder_ids = {f.id for f in folders if f.is_default}
+        video_items = [
+            it for it in all_items
+            if it.type == 2 and it.bvid
+            and item_folder_map.get(it.id) not in default_folder_ids
+        ]
+        skipped = sum(
+            1 for it in all_items
+            if it.type == 2 and it.bvid
+            and item_folder_map.get(it.id) in default_folder_ids
+        )
+        if skipped:
+            print(f"正在获取视频信息 ({len(video_items)} 个，默认收藏夹 {skipped} 个跳过)...")
+        else:
+            print(f"正在获取视频信息 ({len(video_items)} 个)...")
         cached_count = 0
         fetched_count = 0
         for idx, item in enumerate(video_items):
@@ -252,13 +261,16 @@ async def cmd_classify(
             if (idx + 1) % 20 == 0 or (idx + 1) == len(video_items):
                 print(f"  [{idx + 1}/{len(video_items)}] 视频信息 (缓存: {cached_count}, 新获取: {fetched_count})")
 
-        print(f"  ✅ 视频信息: {cached_count} 来自缓存, {fetched_count} 新获取")
+        if skipped:
+            print(f"  ✅ 视频信息: {cached_count} 来自缓存, {fetched_count} 新获取 ({skipped} 个默认收藏夹跳过)")
+        else:
+            print(f"  ✅ 视频信息: {cached_count} 来自缓存, {fetched_count} 新获取")
 
         # Build and save state
         existing_titles = [f.title for f in all_folders if f.title != "稍后再看"]
         state = StateData(
-            scope_kind=scope_kind,
-            scope_value=scope_value,
+            scope_kind="folder",
+            scope_value=folder_name,
             folders=[f for f in all_folders if f.title != "稍后再看"],
             invalid_items=invalid_entries,
             duplicate_groups=duplicates,
@@ -664,14 +676,9 @@ def cli() -> None:
 
     # classify
     p_classify = sub.add_parser("classify", help="扫描收藏夹，准备分类数据")
-    scope_group = p_classify.add_mutually_exclusive_group(required=True)
-    scope_group.add_argument(
-        "--folder", type=str, metavar="NAME",
-        help="指定要整理的收藏夹名称",
-    )
-    scope_group.add_argument(
-        "--all", action="store_true",
-        help="整理所有收藏夹",
+    p_classify.add_argument(
+        "--folder", type=str, metavar="NAME", required=True,
+        help="要整理的收藏夹名称",
     )
     p_classify.add_argument(
         "--clear-cache", action="store_true",
@@ -706,11 +713,8 @@ def cli() -> None:
     args = parser.parse_args()
 
     if args.command == "classify":
-        scope_kind = "all" if args.all else "folder"
-        scope_value = "全部" if args.all else args.folder
         sys.exit(asyncio.run(cmd_classify(
-            scope_kind=scope_kind,
-            scope_value=scope_value,
+            folder_name=args.folder,
             clear_cache=args.clear_cache,
             count=args.count,
             dedup=args.dedup,
