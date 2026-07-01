@@ -19,6 +19,7 @@ from .models import (
     FavoritedItem,
     Folder,
     OrganizePlan,
+    PlanFile,
 )
 
 # B站 API limits POST calls to at most 30 resources per request
@@ -283,3 +284,122 @@ async def execute_plan(
 def _chunk(items: list[str], size: int) -> list[list[str]]:
     """Split *items* into sub-lists of at most *size* elements each."""
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+# ======================================================================
+# PlanFile executor — used by the ``execute`` CLI subcommand
+# ======================================================================
+
+
+async def execute_plan_file(
+    plan_file: PlanFile,
+    fav_api,
+    mid: int,
+) -> None:
+    """Execute a deserialized ``PlanFile`` against the B站 API.
+
+    Order: collect existing folder mappings → create folders →
+    move/copy items → delete items.  Batches of ≤30 resources.
+    Failures are logged but don't stop execution.
+    """
+    BATCH = 30
+    step = 0
+
+    # Collect existing folder id↔title mappings
+    title_to_id: dict[str, int] = {}
+    try:
+        existing = await fav_api.list_all_folders(up_mid=mid)
+        for f in existing:
+            title_to_id[f.title] = f.id
+    except Exception as exc:
+        print(f"⚠️  获取已有文件夹失败: {exc}")
+
+    # Count total steps
+    total_steps = len(plan_file.folders_to_create)
+    for m in plan_file.moves:
+        total_steps += max((len(m.resources) + BATCH - 1) // BATCH, 0)
+    for d in plan_file.deletions:
+        total_steps += max((len(d.resources) + BATCH - 1) // BATCH, 0)
+
+    # ── Phase 1: Create folders ───────────────────────────────────
+    for title in plan_file.folders_to_create:
+        step += 1
+        try:
+            resp = await fav_api.create_folder(title=title)
+            data = resp.get("data", {})
+            if isinstance(data, dict) and "id" in data:
+                title_to_id[title] = data["id"]
+            print(f"📁 [{step}/{total_steps}] 创建文件夹 '{title}'")
+        except Exception as exc:
+            print(f"⚠️  创建文件夹 '{title}' 失败: {exc}")
+
+    # ── Phase 2: Move / Copy items ────────────────────────────────
+    move_entries = [m for m in plan_file.moves if m.action == "move"]
+    copy_entries = [m for m in plan_file.moves if m.action == "copy"]
+
+    for m in move_entries:
+        if not m.resources:
+            continue
+        tar_id = title_to_id.get(m.target_title, 0)
+        if tar_id == 0:
+            print(f"⚠️  目标文件夹 '{m.target_title}' 不存在，跳过移动")
+            continue
+        resources = [f"{r.id}:{r.type}" for r in m.resources]
+        batches = [resources[i:i + BATCH] for i in range(0, len(resources), BATCH)]
+        for batch_idx, batch in enumerate(batches):
+            step += 1
+            suffix = f" (批次 {batch_idx + 1}/{len(batches)})" if len(batches) > 1 else ""
+            desc = f"移动 {len(batch)} 个资源到 '{m.target_title}'{suffix}"
+            print(f"↗️  [{step}/{total_steps}] {desc}")
+            try:
+                await fav_api.move_items(
+                    src_media_id=m.source_folder_id,
+                    tar_media_id=tar_id,
+                    resources=batch,
+                    mid=mid,
+                )
+            except Exception as exc:
+                print(f"⚠️  移动失败: {exc}")
+
+    for c in copy_entries:
+        if not c.resources:
+            continue
+        tar_id = title_to_id.get(c.target_title, 0)
+        if tar_id == 0:
+            print(f"⚠️  目标文件夹 '{c.target_title}' 不存在，跳过复制")
+            continue
+        resources = [f"{r.id}:{r.type}" for r in c.resources]
+        batches = [resources[i:i + BATCH] for i in range(0, len(resources), BATCH)]
+        for batch_idx, batch in enumerate(batches):
+            step += 1
+            suffix = f" (批次 {batch_idx + 1}/{len(batches)})" if len(batches) > 1 else ""
+            desc = f"复制 {len(batch)} 个资源到 '{c.target_title}'{suffix}"
+            print(f"📋 [{step}/{total_steps}] {desc}")
+            try:
+                await fav_api.copy_items(
+                    src_media_id=c.source_folder_id,
+                    tar_media_id=tar_id,
+                    resources=batch,
+                    mid=mid,
+                )
+            except Exception as exc:
+                print(f"⚠️  复制失败: {exc}")
+
+    # ── Phase 3: Delete items ─────────────────────────────────────
+    for d in plan_file.deletions:
+        if not d.resources:
+            continue
+        resources = [f"{r.id}:{r.type}" for r in d.resources]
+        batches = [resources[i:i + BATCH] for i in range(0, len(resources), BATCH)]
+        for batch_idx, batch in enumerate(batches):
+            step += 1
+            suffix = f" (批次 {batch_idx + 1}/{len(batches)})" if len(batches) > 1 else ""
+            desc = f"删除 {len(batch)} 个资源 (收藏夹 {d.source_folder_id}){suffix}"
+            print(f"🗑️  [{step}/{total_steps}] {desc}")
+            try:
+                await fav_api.batch_delete(
+                    media_id=d.source_folder_id,
+                    resources=batch,
+                )
+            except Exception as exc:
+                print(f"⚠️  删除失败: {exc}")

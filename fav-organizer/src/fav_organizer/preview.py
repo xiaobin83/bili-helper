@@ -13,6 +13,34 @@ from collections import defaultdict
 from .models import FavoritedItem, Operation, OrganizePlan
 
 
+# ======================================================================
+# Public API — two preview formats
+# ======================================================================
+
+
+def generate_preview(plan: OrganizePlan) -> str:
+    """Generate a compact Markdown preview (used by the ``plan`` subcommand).
+
+    Designed for CLI output: emoji icons, compact layout, execute hint.
+    """
+    blocks: list[str] = [
+        "# 🗂️ 收藏夹整理计划",
+        "",
+        _summary_bar(plan),
+        "",
+        "---",
+        "",
+        _new_folder_section(plan),
+        _invalid_table(plan),
+        _move_table(plan),
+    ]
+    blocks.append("---")
+    blocks.append("")
+    blocks.append("**审核后可使用 `fav-organizer execute` 执行**")
+
+    return "\n".join(blocks)
+
+
 def format_preview(plan: OrganizePlan) -> str:
     """Render *plan* as a structured Markdown preview string.
 
@@ -162,3 +190,92 @@ def _duplicate_deletions(deletions: list[Operation]) -> list[Operation]:
         for op in deletions
         if op.resources and all(item.attr == 0 for item in op.resources)
     ]
+
+
+# ======================================================================
+# Helpers for generate_preview (compact CLI format)
+# ======================================================================
+
+
+def _summary_bar(plan: OrganizePlan) -> str:
+    """Return a compact summary line for the plan."""
+    parts = []
+    if plan.folders_to_create:
+        parts.append(f"📁 新建 {len(plan.folders_to_create)} 个文件夹")
+    if plan.moves:
+        moves = [op for op in plan.moves if op.action == "move"]
+        copies = [op for op in plan.moves if op.action == "copy"]
+        total_moved = sum(len(op.resources) for op in moves)
+        total_copied = sum(len(op.resources) for op in copies)
+        if total_moved:
+            parts.append(f"↗️  移动 {total_moved} 个内容")
+        if total_copied:
+            parts.append(f"📋 复制 {total_copied} 个内容")
+    if plan.deletions:
+        total_del = sum(len(op.resources) for op in plan.deletions)
+        parts.append(f"🗑️  删除 {total_del} 个内容")
+    return "  ".join(parts) if parts else "✅ 无需任何操作"
+
+
+def _invalid_table(plan: OrganizePlan) -> str:
+    """Return a Markdown table of invalid/deleted items."""
+    if not plan.deletions:
+        return ""
+    lines = [
+        "### 🗑️ 失效/重复内容",
+        "",
+        "| # | 标题 | 来源文件夹 | 操作 |",
+        "|---|------|-----------|------|",
+    ]
+    idx = 0
+    for op in plan.deletions:
+        if op.action != "batch_delete":
+            continue
+        src = op.source.title if op.source else "—"
+        for res in op.resources:
+            idx += 1
+            lines.append(f"| {idx} | {res.title or '—'} | {src} | 删除 |")
+    return "\n".join(lines)
+
+
+def _move_table(plan: OrganizePlan) -> str:
+    """Return a Markdown section of classification moves/copies grouped by target."""
+    if not plan.moves:
+        return ""
+    lines = [
+        "### ↗️ 分类整理计划",
+        "",
+    ]
+    groups: dict[str, list[Operation]] = defaultdict(list)
+    for op in plan.moves:
+        target = str(op.target) if op.target else "未分类"
+        groups[target].append(op)
+
+    for target in sorted(groups):
+        ops = groups[target]
+        total = sum(len(op.resources) for op in ops)
+        sources = ", ".join(sorted({op.source.title for op in ops if op.source}))
+        action_label = "移动" if any(op.action == "move" for op in ops) else "复制"
+        action_icon = "↗️" if action_label == "移动" else "📋"
+        lines.append(f"**{action_icon} → {target}** ({action_label} {total} 个，来源: {sources})")
+        lines.append("")
+        for op in ops:
+            for res in op.resources:
+                lines.append(f"  - {res.title or '—'} ({res.bvid})")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def _new_folder_section(plan: OrganizePlan) -> str:
+    """Return a Markdown list of folders to be created."""
+    if not plan.folders_to_create:
+        return ""
+    lines = [
+        "### 📁 新文件夹",
+        "",
+    ]
+    for title in plan.folders_to_create:
+        lines.append(f"- **{title}**")
+    lines.append("")
+    return "\n".join(lines)

@@ -21,7 +21,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 from bili_core.auth import check_expired, get_credentials
@@ -30,6 +29,7 @@ from bili_core.http_client import BiliHTTPClient
 from bili_core.signing import sign_params
 from .confirm import confirm_execution
 from .dedup import detect_duplicates
+from .executor import execute_plan_file
 from .fav_api import FavAPI
 from .models import (
     BatchMeta,
@@ -47,183 +47,12 @@ from .models import (
     PlanResourceRef,
     StateData,
 )
+from .pipeline import cleanup_pipeline_files, cmd_prepare_next_batch
 from .planner import build_plan
+from .preview import generate_preview
 from .scanner import scan_invalid
 from .state_manager import StateManager
 from .video_api import VideoInfoAPI
-
-# ======================================================================
-# Preview / Markdown generation (used by "plan" command)
-# ======================================================================
-
-
-def _summary_bar(plan: OrganizePlan) -> str:
-    """Return a compact summary line for the plan."""
-    parts = []
-    if plan.folders_to_create:
-        parts.append(f"📁 新建 {len(plan.folders_to_create)} 个文件夹")
-    if plan.moves:
-        moves = [op for op in plan.moves if op.action == "move"]
-        copies = [op for op in plan.moves if op.action == "copy"]
-        total_moved = sum(len(op.resources) for op in moves)
-        total_copied = sum(len(op.resources) for op in copies)
-        if total_moved:
-            parts.append(f"↗️  移动 {total_moved} 个内容")
-        if total_copied:
-            parts.append(f"📋 复制 {total_copied} 个内容")
-    if plan.deletions:
-        total_del = sum(len(op.resources) for op in plan.deletions)
-        parts.append(f"🗑️  删除 {total_del} 个内容")
-    return "  ".join(parts) if parts else "✅ 无需任何操作"
-
-
-def _invalid_table(plan: OrganizePlan) -> str:
-    """Return a Markdown table of invalid/deleted items."""
-    if not plan.deletions:
-        return ""
-    lines = [
-        "### 🗑️ 失效/重复内容",
-        "",
-        "| # | 标题 | 来源文件夹 | 操作 |",
-        "|---|------|-----------|------|",
-    ]
-    idx = 0
-    for op in plan.deletions:
-        if op.action != "batch_delete":
-            continue
-        src = op.source.title if op.source else "—"
-        for res in op.resources:
-            idx += 1
-            lines.append(f"| {idx} | {res.title or '—'} | {src} | 删除 |")
-    return "\n".join(lines)
-
-
-def _move_table(plan: OrganizePlan) -> str:
-    """Return a Markdown section of classification moves/copies grouped by target."""
-    if not plan.moves:
-        return ""
-    lines = [
-        "### ↗️ 分类整理计划",
-        "",
-    ]
-    groups: dict[str, list[Operation]] = defaultdict(list)
-    for op in plan.moves:
-        target = str(op.target) if op.target else "未分类"
-        groups[target].append(op)
-
-    for target in sorted(groups):
-        ops = groups[target]
-        total = sum(len(op.resources) for op in ops)
-        sources = ", ".join(sorted({op.source.title for op in ops if op.source}))
-        action_label = "移动" if any(op.action == "move" for op in ops) else "复制"
-        action_icon = "↗️" if action_label == "移动" else "📋"
-        lines.append(f"**{action_icon} → {target}** ({action_label} {total} 个，来源: {sources})")
-        lines.append("")
-        for op in ops:
-            for res in op.resources:
-                lines.append(f"  - {res.title or '—'} ({res.bvid})")
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def _new_folder_section(plan: OrganizePlan) -> str:
-    """Return a Markdown list of folders to be created."""
-    if not plan.folders_to_create:
-        return ""
-    lines = [
-        "### 📁 新文件夹",
-        "",
-    ]
-    for title in plan.folders_to_create:
-        lines.append(f"- **{title}**")
-    lines.append("")
-    return "\n".join(lines)
-
-
-def generate_preview(plan: OrganizePlan) -> str:
-    """Generate a structured Markdown preview of the organize plan."""
-    blocks: list[str] = [
-        "# 🗂️ 收藏夹整理计划",
-        "",
-        _summary_bar(plan),
-        "",
-        "---",
-        "",
-        _new_folder_section(plan),
-        _invalid_table(plan),
-        _move_table(plan),
-    ]
-    blocks.append("---")
-    blocks.append("")
-    blocks.append("**审核后可使用 `fav-organizer execute` 执行**")
-
-    return "\n".join(blocks)
-
-
-# ======================================================================
-# Pipeline cleanup
-# ======================================================================
-
-
-def _cleanup_pipeline_files(mgr: StateManager, plan_path: str | None) -> None:
-    """Advance batch or delete intermediate pipeline files after successful execution."""
-    if mgr.has_batch_meta():
-        meta = mgr.load_batch_meta()
-        meta.current_offset += meta.batch_size
-        if meta.is_last_batch:
-            mgr.delete_file(mgr.FILE_BATCH_META)
-            mgr.delete_file(mgr.FILE_CLASSIFICATION)
-            if plan_path is None:
-                mgr.delete_file(mgr.FILE_PLAN)
-            print("✅ 所有批次已完成")
-        else:
-            mgr.save_batch_meta(meta)
-            mgr.delete_file(mgr.FILE_CLASSIFICATION)
-            if plan_path is None:
-                mgr.delete_file(mgr.FILE_PLAN)
-            print(f"📦 第 {meta.current_batch}/{meta.total_batches} 批完成，运行 classify 继续下一批")
-    else:
-        mgr.delete_file(mgr.FILE_CLASSIFICATION)
-        if plan_path is None:
-            mgr.delete_file(mgr.FILE_PLAN)
-
-
-def _cmd_classify_continue(mgr: StateManager) -> int:
-    """Create the next batch's classification from existing state.json."""
-    try:
-        state = mgr.load_state()
-    except Exception as e:
-        print(f"❌ 读取状态文件失败: {e}")
-        return 1
-
-    meta = mgr.load_batch_meta()
-    video_items = [it for it in state.items_to_classify if it.type == 2]
-
-    if meta.current_offset >= len(video_items):
-        mgr.delete_file(mgr.FILE_BATCH_META)
-        print("✅ 所有批次已完成")
-        return 0
-
-    batch_end = min(meta.current_offset + meta.batch_size, len(video_items))
-    batch_items = video_items[meta.current_offset : batch_end]
-    batch_ids = {it.id for it in batch_items}
-
-    classification = ClassificationResultList(
-        classifications=[
-            ClassificationEntry(item_id=it.id, category="")
-            for it in batch_items
-        ],
-        existing_folder_titles=state.existing_folder_titles,
-    )
-    mgr.save_classification(classification)
-
-    batch_num = meta.current_batch
-    total = meta.total_batches
-    print(f"\n📦 第 {batch_num}/{total} 批 ({len(batch_items)} 个视频)")
-    print(f"📝 分类模板已更新: {mgr.state_dir / 'classification_result.json'}")
-    print(f"请编辑分类后运行: uv run fav-organizer plan")
-    return 0
 
 
 # ======================================================================
@@ -297,7 +126,7 @@ async def cmd_classify(
 
     # Continuation: pick next batch from existing state
     if mgr.has_batch_meta():
-        return _cmd_classify_continue(mgr)
+        return cmd_prepare_next_batch(mgr)
 
     # Auth
     creds = get_credentials(env_prefix="BILI_", auth_file=DEFAULT_AUTH_FILE)
@@ -730,11 +559,11 @@ async def cmd_execute(*, plan_path: str | None = None) -> int:
         )
 
         print("正在执行整理...")
-        await _execute_plan_file(plan_file, fav_api, mid=creds.mid)
+        await execute_plan_file(plan_file, fav_api, mid=creds.mid)
         print("✅ 整理完成")
 
         # Clean up intermediate files after successful execution
-        _cleanup_pipeline_files(mgr, plan_path)
+        cleanup_pipeline_files(mgr, plan_path)
         return 0
 
     finally:
@@ -819,128 +648,6 @@ async def cmd_list() -> int:
 
     finally:
         await http.close()
-
-
-async def _execute_plan_file(
-    plan_file: PlanFile,
-    fav_api: FavAPI,
-    mid: int,
-) -> None:
-    """Execute a PlanFile against the B站 API.
-
-    Order: collect existing folders → create folders → move items →
-    delete items.
-    Batches of ≤30 resources. Failures logged but don't stop execution.
-    """
-    BATCH = 30
-    step = 0
-
-    # ── Phase 0: Collect existing folder id↔title mappings ──────────
-    title_to_id: dict[str, int] = {}
-    try:
-        existing = await fav_api.list_all_folders(up_mid=mid)
-        for f in existing:
-            title_to_id[f.title] = f.id
-    except Exception as exc:
-        print(f"⚠️  获取已有文件夹失败: {exc}")
-
-    # ── Count total steps ───────────────────────────────────────────
-    total_steps = len(plan_file.folders_to_create)
-    for m in plan_file.moves:
-        total_steps += max((len(m.resources) + BATCH - 1) // BATCH, 0)
-    for d in plan_file.deletions:
-        total_steps += max((len(d.resources) + BATCH - 1) // BATCH, 0)
-
-    # ── Phase 1: Create folders ─────────────────────────────────────
-    for title in plan_file.folders_to_create:
-        step += 1
-        try:
-            resp = await fav_api.create_folder(title=title)
-            data = resp.get("data", {})
-            if isinstance(data, dict) and "id" in data:
-                title_to_id[title] = data["id"]
-            print(f"📁 [{step}/{total_steps}] 创建文件夹 '{title}'")
-        except Exception as exc:
-            print(f"⚠️  创建文件夹 '{title}' 失败: {exc}")
-
-    # ── Phase 2: Move / Copy items ───────────────────────────────────
-    move_entries = [m for m in plan_file.moves if m.action == "move"]
-    copy_entries = [m for m in plan_file.moves if m.action == "copy"]
-
-    for m in move_entries:
-        if not m.resources:
-            continue
-
-        tar_id = title_to_id.get(m.target_title, 0)
-        if tar_id == 0:
-            print(f"⚠️  目标文件夹 '{m.target_title}' 不存在，跳过移动")
-            continue
-
-        resources = [f"{r.id}:{r.type}" for r in m.resources]
-        batches = [resources[i:i + BATCH] for i in range(0, len(resources), BATCH)]
-
-        for batch_idx, batch in enumerate(batches):
-            step += 1
-            suffix = f" (批次 {batch_idx + 1}/{len(batches)})" if len(batches) > 1 else ""
-            desc = f"移动 {len(batch)} 个资源到 '{m.target_title}'{suffix}"
-            print(f"↗️  [{step}/{total_steps}] {desc}")
-            try:
-                await fav_api.move_items(
-                    src_media_id=m.source_folder_id,
-                    tar_media_id=tar_id,
-                    resources=batch,
-                    mid=mid,
-                )
-            except Exception as exc:
-                print(f"⚠️  移动失败: {exc}")
-
-    for c in copy_entries:
-        if not c.resources:
-            continue
-
-        tar_id = title_to_id.get(c.target_title, 0)
-        if tar_id == 0:
-            print(f"⚠️  目标文件夹 '{c.target_title}' 不存在，跳过复制")
-            continue
-
-        resources = [f"{r.id}:{r.type}" for r in c.resources]
-        batches = [resources[i:i + BATCH] for i in range(0, len(resources), BATCH)]
-
-        for batch_idx, batch in enumerate(batches):
-            step += 1
-            suffix = f" (批次 {batch_idx + 1}/{len(batches)})" if len(batches) > 1 else ""
-            desc = f"复制 {len(batch)} 个资源到 '{c.target_title}'{suffix}"
-            print(f"📋 [{step}/{total_steps}] {desc}")
-            try:
-                await fav_api.copy_items(
-                    src_media_id=c.source_folder_id,
-                    tar_media_id=tar_id,
-                    resources=batch,
-                    mid=mid,
-                )
-            except Exception as exc:
-                print(f"⚠️  复制失败: {exc}")
-
-    # ── Phase 3: Delete items ───────────────────────────────────────
-    for d in plan_file.deletions:
-        if not d.resources:
-            continue
-
-        resources = [f"{r.id}:{r.type}" for r in d.resources]
-        batches = [resources[i:i + BATCH] for i in range(0, len(resources), BATCH)]
-
-        for batch_idx, batch in enumerate(batches):
-            step += 1
-            suffix = f" (批次 {batch_idx + 1}/{len(batches)})" if len(batches) > 1 else ""
-            desc = f"删除 {len(batch)} 个资源 (收藏夹 {d.source_folder_id}){suffix}"
-            print(f"🗑️  [{step}/{total_steps}] {desc}")
-            try:
-                await fav_api.batch_delete(
-                    media_id=d.source_folder_id,
-                    resources=batch,
-                )
-            except Exception as exc:
-                print(f"⚠️  删除失败: {exc}")
 
 
 # ======================================================================

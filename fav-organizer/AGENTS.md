@@ -1,6 +1,7 @@
 # fav-organizer — favorites management
 
-Largest skill (1,025-line CLI). 5 subcommands: `classify`, `plan`, `execute`, `delete-empty`, `list`.
+5 subcommands: `classify`, `plan`, `execute`, `delete-empty`, `list`.
+All state files stored under `~/.bili-helper/fav-organizer/` (not in project tree).
 
 ## PIPELINE
 
@@ -17,25 +18,27 @@ classify → (Agent classifies each item via LLM) → plan → execute
 ```
 src/
 └── fav_organizer/
-    ├── main.py           # CLI entry (1025 lines — needs splitting)
+    ├── main.py           # CLI entry + command handlers (732 LOC)
     ├── fav_api.py        # Model-returning wrapper around bili-core FavClient
     ├── scanner.py        # Invalid content scanner
     ├── dedup.py          # Duplicate detection
     ├── planner.py        # Plan generation from classification
-    ├── executor.py       # Plan execution
-    ├── models.py         # Pydantic models (Folder, FavoritedItem)
-    ├── state_manager.py  # State file I/O
-    ├── preview.py        # Markdown preview generation
+    ├── executor.py       # Plan execution (execute_plan + execute_plan_file)
+    ├── pipeline.py       # Multi-batch state management & cleanup
+    ├── models.py         # Pydantic models (Folder, FavoritedItem, …)
+    ├── state_manager.py  # State file I/O under ~/.bili-helper/fav-organizer/
+    ├── preview.py        # Markdown preview generation (2 formats)
     ├── confirm.py        # Interactive confirmation
-    └── tests/            # 15 files, 310+ cases
+    ├── video_api.py      # Video info API with disk-backed 30-day cache
+    └── tests/            # 14 files, 274+ cases
 ```
 
 ## TEST COVERAGE
 
-Good: 15 test files, 310+ test cases, pytest-cov configured.
-Has `test_placeholder.py` (stub) and orphan `.pyc` for 3 deleted test files.
+Good: 14 test files, 274 test cases, pytest-cov configured.
+All pre-existing stub `test_placeholder.py` and orphan `.pyc` files removed.
 
-## ANTI-PATTERNS
+## OBSERVATIONS
 
-- `main.py`: 1025 lines (4x over 250 LOC guideline)
-- `fav_api.py`: Legacy pre-bili-core client, now wraps `bili_core.fav.FavClient`
+- `main.py`: 732 lines (still ~3x over 250 LOC guideline, but improved from 1025)
+- `fav_api.py`: Thin model-returning wrapper around `bili_core.fav.FavClient`

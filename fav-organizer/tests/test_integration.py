@@ -17,7 +17,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from bili_core.auth import Credentials as AuthCredentialsDC
-from src.fav_organizer.main import cmd_classify, cmd_plan, cmd_execute, generate_preview
+from src.fav_organizer.main import cmd_classify, cmd_plan, cmd_execute
+from src.fav_organizer.preview import generate_preview
 from src.fav_organizer.models import (
     ClassificationEntry,
     ClassificationResult,
