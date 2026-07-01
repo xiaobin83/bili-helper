@@ -32,9 +32,8 @@ classify → state.json + classification_result.json → plan → plan.json → 
 ### classify — 数据采集
 
 ```bash
-uv run fav-organizer classify --folder "默认收藏夹"   # 指定文件夹
-uv run fav-organizer classify --all                   # 所有文件夹
-uv run fav-organizer classify --all --clear-cache     # 清除视频缓存
+uv run fav-organizer classify --folder "默认收藏夹"   # 指定收藏夹
+uv run fav-organizer classify --folder "默认收藏夹" --clear-cache  # 清除视频缓存
 ```
 
 完成：鉴权 → 扫描失效 → 去重 → 获取视频元数据（磁盘缓存，30 天 TTL）→ 输出数据文件。

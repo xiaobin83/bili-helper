@@ -15,15 +15,14 @@ classify (数据采集) → 分类结果.json (Agent 填写) → plan (生成计
 
 ### 阶段 1: classify — 扫描收藏夹，准备数据
 
+> 必须指定 `--folder` 参数。若用户未明确指定收藏夹名称，则目标为**默认收藏夹**。
+
 ```bash
 # 整理指定收藏夹
 uv run fav-organizer classify --folder "默认收藏夹"
 
-# 整理所有收藏夹
-uv run fav-organizer classify --all
-
 # 清除视频缓存后重新扫描
-uv run fav-organizer classify --all --clear-cache
+uv run fav-organizer classify --folder "默认收藏夹" --clear-cache
 
 # 仅整理前 N 个收藏内容
 uv run fav-organizer classify --folder "默认收藏夹" --count 20
