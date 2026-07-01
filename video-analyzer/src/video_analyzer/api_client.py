@@ -14,6 +14,7 @@ from bili_core.auth import Credentials, DEFAULT_AUTH_FILE, get_credentials
 from bili_core.errors import AuthError
 from bili_core.http_client import BiliHTTPClient
 from bili_core.signing import sign_params
+from bili_core.video_info import VideoDetailClient
 
 from video_analyzer.models import (
     AISummary,
@@ -39,21 +40,26 @@ class VideoAPIClient:
     def __init__(self, http_client: Optional[BiliHTTPClient] = None) -> None:
         if http_client is not None:
             self._client = http_client
-            return
+        else:
+            # Full credential flow: .auth.json → env vars → QR login (no public fallback)
+            try:
+                creds = get_credentials(auth_file=DEFAULT_AUTH_FILE)
+            except (SystemExit, RuntimeError):
+                creds = None
 
-        # Full credential flow: .auth.json → env vars → QR login (no public fallback)
-        try:
-            creds = get_credentials(auth_file=DEFAULT_AUTH_FILE)
-        except (SystemExit, RuntimeError):
-            creds = None
+            if creds is None:
+                raise AuthError("需要 B站 登录凭证，请扫码登录或设置 BILI_SESSDATA 环境变量")
 
-        if creds is None:
-            raise AuthError("需要 B站 登录凭证，请扫码登录或设置 BILI_SESSDATA 环境变量")
+            self._client = BiliHTTPClient(
+                sessdata=creds.sessdata,
+                bili_jct=creds.bili_jct,
+                buvid3=creds.buvid3,
+            )
 
-        self._client = BiliHTTPClient(
-            sessdata=creds.sessdata,
-            bili_jct=creds.bili_jct,
-            buvid3=creds.buvid3,
+        # Shared client from bili-core — canonical implementation
+        self._video_detail_client = VideoDetailClient(
+            http_client=self._client,
+            signing=sign_params,
         )
 
     async def _get(self, url: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
@@ -65,16 +71,8 @@ class VideoAPIClient:
     # ------------------------------------------------------------------
 
     async def fetch_video_detail(self, bvid: str) -> VideoDetail:
-        """Fetch video metadata.  Raises ``ValueError`` if *bvid* is invalid."""
-        raw = await self._get(
-            f"{BASE_URL}/x/web-interface/view",
-            params={"bvid": bvid},
-        )
-        code = raw.get("code")
-        if code != 0:
-            msg = raw.get("message", "unknown error")
-            raise ValueError(f"Invalid bvid '{bvid}': [{code}] {msg}")
-        return VideoDetail.model_validate(raw["data"])
+        """Fetch video metadata.  Delegates to ``VideoDetailClient`` in bili-core."""
+        return await self._video_detail_client.fetch_video_detail(bvid)
 
     async def fetch_hot_comments(self, avid: int, bvid: str) -> list[Comment]:
         """Return up to 10 hot comments.

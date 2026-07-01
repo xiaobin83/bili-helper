@@ -1,31 +1,15 @@
 """Pydantic v2 models for video-analyzer API response types.
 
 All models use extra="ignore" to discard unexpected API fields.
+``VideoDetail`` is re-exported from ``bili_core.video_info`` — the canonical
+definition lives in the shared library for cross-skill reuse.
 """
 
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict
 
-
-class VideoDetail(BaseModel):
-    """Video metadata fields needed for markdown display."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    aid: int
-    bvid: str
-    cid: int
-    title: str
-    desc: str = ""
-    duration: int  # seconds
-    pubdate: int  # unix timestamp
-    owner: dict  # {"mid": int, "name": str, "face": str}
-    stat: dict  # {"view": int, "danmaku": int, "reply": int, "favorite": int, "coin": int, "share": int, "like": int}
-    tname: str = ""  # zone/subzone name
-    pic: str = ""  # cover URL
-    dynamic: str = ""
-    pub_location: str = ""  # 发布地点 (optional)
+from bili_core.video_info import VideoDetail
 
 
 class Comment(BaseModel):
