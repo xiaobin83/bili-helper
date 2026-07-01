@@ -13,6 +13,7 @@ from bili_core.fav import FavClient
 from bili_core.http_client import BiliHTTPClient
 from bili_core.search import SearchClient
 from bili_core.signing import sign_params, clear_cache
+from bili_core.video_info import VideoDetail, VideoDetailClient
 
 __all__ = [
     # Auth
@@ -30,6 +31,9 @@ __all__ = [
     # Signing
     "sign_params",
     "clear_cache",
+    # Video info
+    "VideoDetail",
+    "VideoDetailClient",
     # Errors
     "AuthError",
     "CSRFError",
